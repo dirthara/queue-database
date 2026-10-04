@@ -22,6 +22,12 @@ final readonly class DatabaseQueueDriver implements QueueDriver
     {
         $connection = $configuration->has('connection') ? $configuration->string('connection') : null;
 
-        return new DatabaseQueue(database: $this->database->using($connection), clock: $this->clock);
+        return new DatabaseQueue(
+            database: $this->database->using($connection),
+            clock: $this->clock,
+            queue: $configuration->string('queue', 'default'),
+            table: $configuration->string('table', 'queue_messages'),
+            failedTable: $configuration->string('failed_table', 'failed_messages'),
+        );
     }
 }

@@ -34,8 +34,8 @@ final readonly class QueueDatabaseSchema
             $table->string('type');
             $table->binary('payload'); // binary?
             $table->integer('attempts')->unsigned();
-            $table->dateTime('available_at')->nullable();
-            $table->dateTime('created_at');
+            $table->timestamp('available_at')->nullable();
+            $table->timestamp('created_at');
 
             $table->index(['queue', 'available_at']);
         });
@@ -49,7 +49,7 @@ final readonly class QueueDatabaseSchema
             $table->string('failure_type')->nullable();
             $table->text('failure_message')->nullable();
             $table->string('failure_code')->nullable();
-            $table->dateTime('failed_at');
+            $table->timestamp('failed_at');
 
             $table->index('queue');
         });
