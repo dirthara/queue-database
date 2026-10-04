@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "6604390c95b825a38a3d6eac579f265d",
+    "content-hash": "e7393406f27dfc29259e0ef37808ba52",
     "packages": [
         {
             "name": "dirthara/database",
-            "version": "0.1.2",
+            "version": "0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/dirthara/database.git",
-                "reference": "1f00a37240629c0dfa9e29b75d80dc252a213125"
+                "reference": "122bd79e1561cead5b278c67b9618f91cb2a95a7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/dirthara/database/zipball/1f00a37240629c0dfa9e29b75d80dc252a213125",
-                "reference": "1f00a37240629c0dfa9e29b75d80dc252a213125",
+                "url": "https://api.github.com/repos/dirthara/database/zipball/122bd79e1561cead5b278c67b9618f91cb2a95a7",
+                "reference": "122bd79e1561cead5b278c67b9618f91cb2a95a7",
                 "shasum": ""
             },
             "require": {
@@ -25,7 +25,7 @@
                 "php": "^8.5"
             },
             "require-dev": {
-                "phpunit/phpunit": "^12.0 || ^13.0"
+                "phpunit/phpunit": "^13.0"
             },
             "suggest": {
                 "ext-pdo_mysql": "To connect with the MySQL driver",
@@ -49,11 +49,13 @@
                 }
             ],
             "description": "Database connection for the Dirthara framework",
+            "homepage": "https://dirthara.github.io/docs/",
             "support": {
+                "docs": "https://dirthara.github.io/docs/",
                 "issues": "https://github.com/dirthara/database/issues",
-                "source": "https://github.com/dirthara/database/tree/0.1.2"
+                "source": "https://github.com/dirthara/database"
             },
-            "time": "2026-09-27T14:49:55+00:00"
+            "time": "2026-09-30T12:45:11+00:00"
         },
         {
             "name": "dirthara/messaging",
@@ -150,6 +152,56 @@
                 "source": "https://github.com/dirthara/queue"
             },
             "time": "2026-09-29T00:24:27+00:00"
+        },
+        {
+            "name": "dirthara/schema",
+            "version": "0.3.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/dirthara/schema.git",
+                "reference": "3ffea5c51c3c65ba50d689f2f96b2b933e3d9332"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/dirthara/schema/zipball/3ffea5c51c3c65ba50d689f2f96b2b933e3d9332",
+                "reference": "3ffea5c51c3c65ba50d689f2f96b2b933e3d9332",
+                "shasum": ""
+            },
+            "require": {
+                "dirthara/database": "^0.2",
+                "ext-pdo": "*",
+                "php": "^8.5"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^12.0 || ^13.0"
+            },
+            "suggest": {
+                "ext-pdo_mysql": "To build schema against the MySQL driver",
+                "ext-pdo_pgsql": "To build schema against the PostgreSQL driver",
+                "ext-pdo_sqlite": "To build schema against the SQLite driver",
+                "ext-pdo_sqlsrv": "To build schema against the SQL Server driver"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Dirthara\\Schema\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Dirthara"
+                }
+            ],
+            "description": "Schema definition and migrations for the Dirthara framework",
+            "support": {
+                "issues": "https://github.com/dirthara/schema/issues",
+                "source": "https://github.com/dirthara/schema/tree/0.3.0"
+            },
+            "time": "2026-09-30T15:47:28+00:00"
         }
     ],
     "packages-dev": [
