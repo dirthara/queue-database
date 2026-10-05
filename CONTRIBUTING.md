@@ -94,7 +94,8 @@ git push origin 0.1.3
 
 A release is gated on a perfect [Plumb](https://plumbphp.dev) score. Every
 package scores 100 before it is tagged; the packaging rules that get it there
-are in [agents/packaging.md](agents/packaging.md).
+are in
+[CS-8: Packaging](https://github.com/dirthara/coding-standards/blob/main/docs/coding-standards/cs-8-packaging.md).
 
 ```sh
 curl -X POST https://plumbphp.dev/api/v1/packages/dirthara/queue-database
@@ -125,7 +126,7 @@ Then update the supported versions table below and in
 | --- | --- | --- |
 | `0.1` | 8.5 | Active |
 
-The initial `0.1` scaffold is unreleased.
+`0.1` has not been released yet; its first release will be tagged `0.1.0`.
 
 ## Before you open a pull request
 
@@ -148,7 +149,7 @@ Your pull request needs:
 
 - **Documentation that matches.** Behaviour that the [docs](docs) describe is
   updated in the same pull request. See the conventions in
-  [agents/documentation.md](agents/documentation.md).
+  [CS-6: Documentation](https://github.com/dirthara/coding-standards/blob/main/docs/coding-standards/cs-6-documentation.md).
 
 ## Maintainers: protecting a release branch
 
