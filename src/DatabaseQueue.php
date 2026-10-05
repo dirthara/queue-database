@@ -17,31 +17,24 @@ use Dirthara\Queue\ValueObject\FailedMessage;
 use Dirthara\Queue\ValueObject\QueuedMessage;
 use Dirthara\Database\Exception\QueryException;
 use Dirthara\Database\Exception\ConnectionException;
-use Dirthara\Queue\Contract\FailedMessageRepository;
+use Dirthara\QueueDatabase\Repository\StoredMessage;
 use Dirthara\Database\Exception\TransactionException;
 use Dirthara\Queue\Exception\FailedMessageNotFoundException;
 use Dirthara\QueueDatabase\Exception\QueueOperationException;
+use Dirthara\QueueDatabase\Repository\QueueMessageRepository;
+use Dirthara\QueueDatabase\Repository\FailedMessageRepository;
+use Dirthara\Queue\Contract\FailedMessageRepository as FailedMessageRepositoryContract;
 
 use function intdiv;
-use function is_int;
 use function sprintf;
-use function array_map;
-use function is_string;
-use function filter_var;
-use function preg_match;
-use function base64_decode;
-use function base64_encode;
 
-use const PHP_INT_MIN;
-use const FILTER_VALIDATE_INT;
-
-final readonly class DatabaseQueue implements Queue, FailedMessageRepository
+final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryContract
 {
     private const string LATEST = '9999-12-31 23:59:59';
 
-    private const int ATTEMPTS_LIMIT = 2_147_483_647;
+    private QueueMessageRepository $messages;
 
-    private const string INTEGER_PATTERN = '/^-?(?:0|[1-9][0-9]*)$/';
+    private FailedMessageRepository $failedMessages;
 
     public function __construct(
         private ConnectedDatabase $database,
@@ -50,7 +43,10 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
         private string $table,
         private string $failedTable,
         private Duration $reservationTimeout,
-    ) {}
+    ) {
+        $this->messages = new QueueMessageRepository($database, $queue, $table);
+        $this->failedMessages = new FailedMessageRepository($database, $queue, $failedTable);
+    }
 
     /**
      * @throws QueueOperationException
@@ -60,16 +56,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
         $now = $this->clock->now();
 
         try {
-            $this->database
-                ->table($this->table)
-                ->insert([
-                    'queue' => $this->queue,
-                    'type' => $message->type,
-                    'payload' => base64_encode($message->payload),
-                    'attempts' => 0,
-                    'available_at' => $this->availableAt($this->after($now, $delay)),
-                    'created_at' => $this->dateTime($now),
-                ]);
+            $this->messages->insert($message, $this->after($now, $delay), $now);
         } catch (QueryException|ConnectionException $exception) {
             throw QueueOperationException::enqueueFailed($this->queue, $this->table, $this->connection(), $exception);
         }
@@ -81,21 +68,12 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
     public function reserve(): ?Delivery
     {
         try {
-            do {
-                $now = $this->clock->now();
-                $row = $this->nextAvailable($now);
-
-                if ($row === null) {
-                    return null;
-                }
-
-                $delivery = $this->claim($row, $now);
-            } while ($delivery === null);
-
-            return $delivery;
+            $stored = $this->claimNext();
         } catch (QueryException|ConnectionException $exception) {
             throw QueueOperationException::reserveFailed($this->queue, $this->table, $this->connection(), $exception);
         }
+
+        return $stored === null ? null : $this->delivery($stored);
     }
 
     /**
@@ -106,7 +84,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
     public function failed(): iterable
     {
         try {
-            $rows = $this->database->table($this->failedTable)->where('queue', '=', $this->queue)->orderBy('id')->get();
+            return $this->failedMessages->all();
         } catch (QueryException|ConnectionException $exception) {
             throw QueueOperationException::readFailedMessagesFailed(
                 $this->queue,
@@ -115,8 +93,6 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                 $exception,
             );
         }
-
-        return array_map($this->hydrateFailed(...), $rows);
     }
 
     /**
@@ -124,18 +100,8 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
      */
     public function findFailed(string $id): ?FailedMessage
     {
-        $key = $this->failedKey($id);
-
-        if ($key === null) {
-            return null;
-        }
-
         try {
-            $row = $this->database
-                ->table($this->failedTable)
-                ->where('id', '=', $key)
-                ->where('queue', '=', $this->queue)
-                ->first();
+            return $this->failedMessages->find($id);
         } catch (QueryException|ConnectionException $exception) {
             throw QueueOperationException::findFailedMessageFailed(
                 $this->queue,
@@ -145,8 +111,6 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                 $exception,
             );
         }
-
-        return $row === null ? null : $this->hydrateFailed($row);
     }
 
     /**
@@ -155,42 +119,17 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
      */
     public function retry(string $id): void
     {
-        $key = $this->failedKey($id) ?? throw FailedMessageNotFoundException::forId($id);
-
         try {
-            $this->database->transaction(function (ConnectedDatabase $database) use ($id, $key): void {
-                $row = $database
-                    ->table($this->failedTable)
-                    ->where('id', '=', $key)
-                    ->where('queue', '=', $this->queue)
-                    ->first();
+            $this->database->transaction(function () use ($id): void {
+                $failed = $this->failedMessages->find($id) ?? throw FailedMessageNotFoundException::forId($id);
 
-                if ($row === null) {
-                    throw FailedMessageNotFoundException::forId($id);
-                }
-
-                $deleted = $database
-                    ->table($this->failedTable)
-                    ->where('id', '=', $key)
-                    ->where('queue', '=', $this->queue)
-                    ->delete();
-
-                if ($deleted === 0) {
+                if (!$this->failedMessages->delete($id)) {
                     throw FailedMessageNotFoundException::forId($id);
                 }
 
                 $now = $this->clock->now();
 
-                $database
-                    ->table($this->table)
-                    ->insert([
-                        'queue' => $this->queue,
-                        'type' => $this->text($row, 'type', $this->failedTable),
-                        'payload' => base64_encode($this->payload($row, $this->failedTable)),
-                        'attempts' => 0,
-                        'available_at' => $this->availableAt($now),
-                        'created_at' => $this->dateTime($now),
-                    ]);
+                $this->messages->insert($failed->message, $now, $now);
             });
         } catch (QueryException|ConnectionException|TransactionException $exception) {
             throw QueueOperationException::retryFailed(
@@ -209,14 +148,8 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
      */
     public function forget(string $id): void
     {
-        $key = $this->failedKey($id) ?? throw FailedMessageNotFoundException::forId($id);
-
         try {
-            $deleted = $this->database
-                ->table($this->failedTable)
-                ->where('id', '=', $key)
-                ->where('queue', '=', $this->queue)
-                ->delete();
+            $deleted = $this->failedMessages->delete($id);
         } catch (QueryException|ConnectionException $exception) {
             throw QueueOperationException::forgetFailed(
                 $this->queue,
@@ -227,70 +160,68 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
             );
         }
 
-        if ($deleted === 0) {
+        if (!$deleted) {
             throw FailedMessageNotFoundException::forId($id);
         }
     }
 
     /**
-     * @return array<string, mixed>|null
-     *
-     * @throws QueryException
-     * @throws ConnectionException
+     * @throws QueueOperationException
      */
-    private function nextAvailable(DateTimeImmutable $now): ?array
+    public function purgeFailed(DateTimeImmutable $before): int
     {
-        return $this->database
-            ->table($this->table)
-            ->where('queue', '=', $this->queue)
-            ->where('available_at', '<=', $this->availableAt($now))
-            ->orderBy('available_at')
-            ->orderBy('id')
-            ->first();
+        try {
+            return $this->failedMessages->purge($before);
+        } catch (QueryException|ConnectionException $exception) {
+            throw QueueOperationException::purgeFailedMessagesFailed(
+                $this->queue,
+                $this->failedTable,
+                $this->connection(),
+                $exception,
+            );
+        }
     }
 
     /**
-     * @param array<string, mixed> $row
-     *
+     * @throws QueueOperationException
+     */
+    public function truncateFailed(): int
+    {
+        try {
+            return $this->failedMessages->truncate();
+        } catch (QueryException|ConnectionException $exception) {
+            throw QueueOperationException::truncateFailedMessagesFailed(
+                $this->queue,
+                $this->failedTable,
+                $this->connection(),
+                $exception,
+            );
+        }
+    }
+
+    /**
      * @throws QueryException
      * @throws ConnectionException
      * @throws QueueOperationException
      */
-    private function claim(array $row, DateTimeImmutable $now): ?DatabaseDelivery
+    private function claimNext(): ?StoredMessage
     {
-        $id = $this->integer($row, 'id', $this->table, minimum: 1);
-        $attempts = $this->integer($row, 'attempts', $this->table, minimum: 0);
-
-        if ($attempts >= self::ATTEMPTS_LIMIT) {
-            throw QueueOperationException::attemptsExhausted(
-                $this->queue,
-                $this->table,
-                $this->connection(),
-                $id,
-                $attempts,
-            );
-        }
-
-        $attempt = $attempts + 1;
-
-        $message = new QueuedMessage(
-            type: $this->text($row, 'type', $this->table),
-            payload: $this->payload($row, $this->table),
+        do {
+            $now = $this->clock->now();
+            $stored = $this->messages->nextAvailable($now);
+        } while (
+            $stored !== null
+            && !$this->messages->claim($stored, $now, $this->after($now, $this->reservationTimeout))
         );
 
-        $updated = $this->database
-            ->table($this->table)
-            ->where('id', '=', $id)
-            ->where('attempts', '=', $attempts)
-            ->where('available_at', '<=', $this->availableAt($now))
-            ->update([
-                'attempts' => $attempt,
-                'available_at' => $this->availableAt($this->after($now, $this->reservationTimeout)),
-            ]);
+        return $stored;
+    }
 
-        if ($updated === 0) {
-            return null;
-        }
+    private function delivery(StoredMessage $stored): DatabaseDelivery
+    {
+        $id = $stored->id;
+        $attempt = $stored->attempts + 1;
+        $message = $stored->message;
 
         return new DatabaseDelivery(
             queuedMessage: $message,
@@ -307,11 +238,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
     private function acknowledge(int $id, int $attempt): void
     {
         try {
-            $deleted = $this->database
-                ->table($this->table)
-                ->where('id', '=', $id)
-                ->where('attempts', '=', $attempt)
-                ->delete();
+            $deleted = $this->messages->delete($id, $attempt);
         } catch (QueryException|ConnectionException $exception) {
             throw QueueOperationException::acknowledgeFailed(
                 $this->queue,
@@ -321,7 +248,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
             );
         }
 
-        if ($deleted === 0) {
+        if (!$deleted) {
             throw $this->reservationLost($id, $attempt);
         }
     }
@@ -332,15 +259,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
     private function release(int $id, int $attempt, ?Duration $delay): void
     {
         try {
-            $updated = $this->database
-                ->table($this->table)
-                ->where('id', '=', $id)
-                ->where('attempts', '=', $attempt)
-                ->update([
-                    'available_at' => $this->availableAt($this->after($this->clock->now(), $delay)),
-                ]);
-
-            $held = $updated > 0 || $this->reservationExists($id, $attempt);
+            $held = $this->messages->makeAvailable($id, $attempt, $this->after($this->clock->now(), $delay));
         } catch (QueryException|ConnectionException $exception) {
             throw QueueOperationException::releaseFailed($this->queue, $this->table, $this->connection(), $exception);
         }
@@ -356,39 +275,14 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
     private function fail(int $id, int $attempt, QueuedMessage $message, ?Throwable $throwable): void
     {
         $failure = $throwable === null ? null : Failure::fromThrowable($throwable);
-        $code = $failure?->code;
 
         try {
-            $this->database->transaction(function (ConnectedDatabase $database) use (
-                $id,
-                $attempt,
-                $message,
-                $failure,
-                $code,
-            ): void {
-                $deleted = $database
-                    ->table($this->table)
-                    ->where('id', '=', $id)
-                    ->where('attempts', '=', $attempt)
-                    ->delete();
-
-                if ($deleted === 0) {
+            $this->database->transaction(function () use ($id, $attempt, $message, $failure): void {
+                if (!$this->messages->delete($id, $attempt)) {
                     throw $this->reservationLost($id, $attempt);
                 }
 
-                $database
-                    ->table($this->failedTable)
-                    ->insert([
-                        'queue' => $this->queue,
-                        'type' => $message->type,
-                        'payload' => base64_encode($message->payload),
-                        'failed_attempt' => $attempt,
-                        'failure_type' => $failure?->type,
-                        'failure_message' => $failure?->message,
-                        'failure_code_integer' => is_int($code) ? $code : null,
-                        'failure_code_string' => is_string($code) ? $code : null,
-                        'failed_at' => $this->dateTime($this->clock->now()),
-                    ]);
+                $this->failedMessages->insert($message, $attempt, $failure, $this->clock->now());
             });
         } catch (QueryException|ConnectionException|TransactionException $exception) {
             throw QueueOperationException::failFailed(
@@ -400,125 +294,9 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
         }
     }
 
-    /**
-     * @throws QueryException
-     * @throws ConnectionException
-     */
-    private function reservationExists(int $id, int $attempt): bool
-    {
-        return $this->database->table($this->table)->where('id', '=', $id)->where('attempts', '=', $attempt)->exists();
-    }
-
     private function reservationLost(int $id, int $attempt): QueueOperationException
     {
         return QueueOperationException::reservationLost($this->queue, $this->table, $this->connection(), $id, $attempt);
-    }
-
-    /**
-     * @param array<string, mixed> $row
-     *
-     * @throws QueueOperationException
-     */
-    private function hydrateFailed(array $row): FailedMessage
-    {
-        return new FailedMessage(
-            id: (string) $this->integer($row, 'id', $this->failedTable, minimum: 1),
-            message: new QueuedMessage(
-                type: $this->text($row, 'type', $this->failedTable),
-                payload: $this->payload($row, $this->failedTable),
-            ),
-            attempt: $this->integer($row, 'failed_attempt', $this->failedTable, minimum: 1),
-            failure: ($row['failure_type'] ?? null) === null
-                ? null
-                : new Failure(
-                    type: $this->text($row, 'failure_type', $this->failedTable),
-                    message: $this->text($row, 'failure_message', $this->failedTable),
-                    code: $this->failureCode($row),
-                ),
-        );
-    }
-
-    /**
-     * @param array<string, mixed> $row
-     *
-     * @throws QueueOperationException
-     */
-    private function failureCode(array $row): int|string
-    {
-        return match (true) {
-            ($row['failure_code_string'] ?? null) === null => $this->integer(
-                $row,
-                'failure_code_integer',
-                $this->failedTable,
-                minimum: PHP_INT_MIN,
-            ),
-            ($row['failure_code_integer'] ?? null) === null => $this->text(
-                $row,
-                'failure_code_string',
-                $this->failedTable,
-            ),
-            default => throw $this->malformedRow($this->failedTable, 'failure_code_string'),
-        };
-    }
-
-    /**
-     * @param array<string, mixed> $row
-     *
-     * @throws QueueOperationException
-     */
-    private function payload(array $row, string $table): string
-    {
-        $encoded = $this->text($row, 'payload', $table);
-        $payload = base64_decode($encoded, strict: true);
-
-        return $payload !== false && base64_encode($payload) === $encoded
-            ? $payload
-            : throw $this->malformedRow($table, 'payload');
-    }
-
-    /**
-     * @param array<string, mixed> $row
-     *
-     * @throws QueueOperationException
-     */
-    private function integer(array $row, string $column, string $table, int $minimum): int
-    {
-        // @mago-expect analysis:mixed-assignment
-        $value = $row[$column] ?? null;
-
-        $integer = match (true) {
-            is_int($value) => $value,
-            is_string($value) && preg_match(self::INTEGER_PATTERN, $value) === 1 && (string) (int) $value === $value
-                => (int) $value,
-            default => null,
-        };
-
-        return $integer !== null && $integer >= $minimum ? $integer : throw $this->malformedRow($table, $column);
-    }
-
-    /**
-     * @param array<string, mixed> $row
-     *
-     * @throws QueueOperationException
-     */
-    private function text(array $row, string $column, string $table): string
-    {
-        // @mago-expect analysis:mixed-assignment
-        $value = $row[$column] ?? null;
-
-        return is_string($value) ? $value : throw $this->malformedRow($table, $column);
-    }
-
-    private function malformedRow(string $table, string $column): QueueOperationException
-    {
-        return QueueOperationException::malformedRow($this->queue, $table, $this->connection(), $column);
-    }
-
-    private function failedKey(string $id): ?int
-    {
-        $key = filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-
-        return is_int($key) && (string) $key === $id ? $key : null;
     }
 
     private function after(DateTimeImmutable $time, ?Duration $delay): DateTimeImmutable
@@ -541,16 +319,6 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
         $partial = (int) $after->format('u') % 1000;
 
         return $partial === 0 ? $after : $after->modify(sprintf('+%d microseconds', 1000 - $partial));
-    }
-
-    private function availableAt(DateTimeImmutable $time): string
-    {
-        return $time->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s.v');
-    }
-
-    private function dateTime(DateTimeImmutable $time): string
-    {
-        return $time->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     }
 
     private function connection(): string

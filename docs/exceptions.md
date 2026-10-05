@@ -36,7 +36,7 @@ exception, so code using this package never has to catch theirs.
 | --- | --- | --- |
 | `QueueDatabaseConfigurationException` | `InvalidArgumentException` | `DatabaseQueueDriver` is given a connection that is not configured or has no query grammar, or a `reservation_timeout` below 1. |
 | `QueueDatabaseSchemaException` | `RuntimeException` | `QueueDatabaseSchema` cannot reach its connection, or cannot check, create, or drop its tables. |
-| `QueueOperationException` | `RuntimeException` | A queue operation fails in the database, a stale delivery tries to settle a message another worker reserved again, a stored row is malformed, or a message's attempt count cannot be incremented. |
+| `QueueOperationException` | `RuntimeException` | A queue operation, including a purge or truncate of failed messages, fails in the database, a stale delivery tries to settle a message another worker reserved again, a stored row is malformed, or a message's attempt count cannot be incremented. |
 
 A `QueueOperationException` names the operation in its message. Its context holds `queue`, `table`, and `connection`,
 and, depending on the failure:

@@ -26,8 +26,8 @@ The package stores queued and failed messages in a relational database,
 reserves them for workers, and settles each delivery. In scope are flaws in
 that behaviour and in the package's development configuration, such as:
 
-- a queue reading, reserving, retrying, or forgetting a message or failed
-  message that belongs to another queue sharing its tables;
+- a queue reading, reserving, retrying, forgetting, purging, or truncating a
+  message or failed message that belongs to another queue sharing its tables;
 - one attempt of a message reserved by two workers at once, a stale delivery
   settling a message that another worker reserved again, or a message lost
   instead of delivered again or kept as failed;

@@ -16,7 +16,7 @@ and creates its tables through [Dirthara Schema](https://github.com/dirthara/sch
 | --- | --- | --- |
 | `QueueDatabaseSchema` | Creates, checks, and drops the two tables a queue needs | [Schema](schema.md) |
 | `DatabaseQueueDriver` | Creates a queue from a `QueueConfiguration` | [Configuration](configuration.md) |
-| `DatabaseQueue` | Enqueues, reserves, and settles messages, and keeps the ones that failed | [How the queue works](queue-behaviour.md) and [Failed messages](failed-messages.md) |
+| `DatabaseQueue` | Enqueues, reserves, and settles messages, and keeps, retries, and purges the ones that failed | [How the queue works](queue-behaviour.md) and [Failed messages](failed-messages.md) |
 
 The queue implements the `Queue` and `FailedMessageRepository` contracts of Dirthara Queue, so a worker processes it like
 any other queue. Publishing, handlers, retry policies, and workers are documented with

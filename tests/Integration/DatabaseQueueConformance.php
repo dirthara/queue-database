@@ -567,6 +567,91 @@ trait DatabaseQueueConformance
     }
 
     #[Test]
+    public function it_purges_the_failed_messages_that_failed_before_a_moment(): void
+    {
+        $this->failedMessage('first');
+        $this->clock->advance(60_000);
+        $this->failedMessage('second');
+        $this->clock->advance(60_000);
+        $this->failedMessage('third');
+
+        self::assertSame(1, $this->queue->purgeFailed($this->at('12:01:00.250')));
+        self::assertSame(['second', 'third'], $this->failedTypes());
+        self::assertSame(0, $this->queue->purgeFailed($this->at('12:01:00.250')));
+    }
+
+    #[Test]
+    public function it_keeps_a_failed_message_that_failed_in_the_same_second_as_the_purge_moment(): void
+    {
+        $this->failedMessage('message');
+
+        self::assertSame(0, $this->queue->purgeFailed($this->at('12:00:00.999')));
+        self::assertSame(1, $this->queue->purgeFailed($this->at('12:00:01')));
+    }
+
+    #[Test]
+    public function it_compares_the_purge_moment_in_utc(): void
+    {
+        $this->failedMessage('message');
+
+        $before = $this->at('12:00:00')->setTimezone(new DateTimeZone('Pacific/Kiritimati'));
+        self::assertSame(0, $this->queue->purgeFailed($before));
+
+        $after = $this->at('12:00:01')->setTimezone(new DateTimeZone('America/Los_Angeles'));
+        self::assertSame(1, $this->queue->purgeFailed($after));
+    }
+
+    #[Test]
+    public function it_purges_only_the_failed_messages_of_its_own_queue(): void
+    {
+        $other = $this->queue('other');
+        $this->failedMessage('default');
+        $other->enqueue(new QueuedMessage('other', 'payload'));
+        $this->reserve($other)->fail();
+
+        self::assertSame(1, $this->queue->purgeFailed($this->at('13:00:00')));
+        self::assertSame([], $this->failedTypes());
+        self::assertCount(1, $this->failed($other));
+    }
+
+    #[Test]
+    public function it_truncates_every_failed_message_of_its_own_queue(): void
+    {
+        $other = $this->queue('other');
+        $this->failedMessage('first');
+        $this->failedMessage('second');
+        $other->enqueue(new QueuedMessage('other', 'payload'));
+        $this->reserve($other)->fail();
+        $this->queue->enqueue(new QueuedMessage('waiting', 'payload'));
+
+        self::assertSame(2, $this->queue->truncateFailed());
+        self::assertSame([], $this->failedTypes());
+        self::assertSame(0, $this->queue->truncateFailed());
+        self::assertCount(1, $this->failed($other));
+        self::assertSame('waiting', $this->reserve()->message->type);
+    }
+
+    #[Test]
+    public function it_wraps_a_database_failure_while_purging_failed_messages(): void
+    {
+        $this->schema->drop();
+
+        $this->expectOperationFailure(self::FAILED_TABLE, function (): void {
+            $this->queue->purgeFailed($this->at('12:00:00'));
+        });
+    }
+
+    #[Test]
+    public function it_wraps_a_database_failure_while_truncating_failed_messages(): void
+    {
+        $this->schema->drop();
+
+        $this->expectOperationFailure(self::FAILED_TABLE, function (): void {
+            $this->queue->truncateFailed();
+        });
+    }
+
+    #[Test]
     public function it_refuses_a_message_whose_stored_payload_is_malformed(): void
     {
         $this->database
@@ -1014,6 +1099,14 @@ trait DatabaseQueueConformance
                 $exception->context,
             );
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function failedTypes(): array
+    {
+        return array_map(static fn(FailedMessage $failed): string => $failed->message->type, $this->failed());
     }
 
     private function schemaFor(): Schema
