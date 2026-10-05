@@ -1,7 +1,7 @@
 ---
 id: queue-behaviour
 title: How the queue works
-sidebar_position: 5
+sidebar_position: 6
 description: Enqueueing, reserving, and settling messages, reservation expiry, delivery guarantees, and time.
 ---
 

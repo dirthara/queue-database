@@ -9,7 +9,8 @@ in a relational database (MySQL, PostgreSQL, SQLite, or SQL Server), so messages
 them and any number of workers can process the same queue. Reservations are claimed optimistically, without row locks,
 and a message whose worker disappears is delivered again once its reservation expires.
 
-Usage documentation lives in [`docs`](docs/intro.md): [setting up the tables](docs/schema.md),
+Usage documentation lives in [`docs`](docs/intro.md): [getting started](docs/getting-started.md),
+[setting up the tables](docs/schema.md),
 [configuring the driver](docs/configuration.md), [how the queue works](docs/queue-behaviour.md),
 [failed messages](docs/failed-messages.md), and [exceptions](docs/exceptions.md). It is published on the Dirthara
 documentation site at <https://dirthara.github.io/docs/>, which documents every package in the framework.

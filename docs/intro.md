@@ -22,4 +22,5 @@ The queue implements the `Queue` and `FailedMessageRepository` contracts of Dirt
 any other queue. Publishing, handlers, retry policies, and workers are documented with
 [Dirthara Queue](https://github.com/dirthara/queue/blob/0.1/docs/intro.md).
 
-See [installation](installation.md) for the requirements, then set up the [schema](schema.md).
+See [installation](installation.md) for the requirements, and [getting started](getting-started.md) for a queue wired
+together from start to finish.

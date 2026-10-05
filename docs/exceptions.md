@@ -1,7 +1,7 @@
 ---
 id: exceptions
 title: Exceptions
-sidebar_position: 7
+sidebar_position: 8
 description: Every exception Dirthara QueueDatabase throws, and when.
 ---
 
@@ -18,6 +18,13 @@ try {
 } catch (QueueDatabaseException $exception) {
     $logger->error($exception->getMessage(), $exception->context);
 }
+```
+
+Code that catches one of them can add what it knows before passing it on. `addContext()` merges its array into the
+context, replacing values under the same keys, and returns the exception:
+
+```php
+throw $exception->addContext(['job' => $jobName]);
 ```
 
 An exception caused by a failure in Dirthara Database or Dirthara Schema is wrapped, with the original as its previous

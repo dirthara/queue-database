@@ -45,6 +45,8 @@ use function is_int;
 use function sprintf;
 use function in_array;
 use function array_map;
+use function is_string;
+use function is_numeric;
 use function array_replace;
 use function array_key_last;
 use function iterator_to_array;
@@ -101,9 +103,7 @@ trait DatabaseQueueConformance
             ),
             new QueryGrammarResolver([$this->driverName()->value => $this->queryGrammar()]),
         );
-        $this->schema = new QueueDatabaseSchema(new Schema($this->database, new SchemaGrammarResolver([
-            $this->driverName()->value => $this->schemaGrammar(),
-        ])), self::TABLE, self::FAILED_TABLE);
+        $this->schema = new QueueDatabaseSchema($this->schemaFor(), self::TABLE, self::FAILED_TABLE);
         $this->clock = new FrozenClock($this->at('12:00:00.250'));
         $this->queue = $this->queue('default');
 
@@ -591,6 +591,130 @@ trait DatabaseQueueConformance
         self::assertSame(0, (int) $this->database->table(self::TABLE)->max('attempts'));
     }
 
+    #[Test]
+    public function it_reports_its_tables_missing_while_one_of_them_is_missing(): void
+    {
+        $schema = new QueueDatabaseSchema($this->schemaFor(), self::TABLE, 'conformance_missing_failed_messages');
+
+        self::assertFalse($schema->exists());
+    }
+
+    #[Test]
+    public function it_creates_a_queue_with_the_default_options(): void
+    {
+        $schema = new QueueDatabaseSchema($this->schemaFor());
+        $schema->drop();
+        $schema->create();
+
+        try {
+            $queue = new DatabaseQueueDriver($this->database, $this->clock)->create(new QueueConfiguration('database'));
+            self::assertInstanceOf(DatabaseQueue::class, $queue);
+
+            $queue->enqueue(new QueuedMessage('message', 'payload'));
+            self::assertSame(1, $queue->reserve()?->attempt);
+
+            self::assertSame(
+                ['queue' => 'default', 'attempts' => 1],
+                $this->only($this->database->table('queue_messages')->first(), 'queue', 'attempts'),
+            );
+
+            $this->clock->advance(59_999);
+            self::assertNull($queue->reserve());
+
+            $this->clock->advance(1);
+            $redelivery = $queue->reserve();
+            self::assertNotNull($redelivery);
+            self::assertSame(2, $redelivery->attempt);
+
+            $redelivery->fail();
+            $failed = iterator_to_array($queue->failed(), preserve_keys: false);
+
+            self::assertCount(1, $failed);
+            self::assertNotNull($this->database->table('failed_messages')->first());
+        } finally {
+            $schema->drop();
+        }
+    }
+
+    #[Test]
+    public function it_runs_on_the_connection_its_configuration_names(): void
+    {
+        $named = new DatabaseQueueDriver($this->database, $this->clock)->create(new QueueConfiguration('database', [
+            'connection' => 'conformance',
+            'table' => self::TABLE,
+            'failed_table' => self::FAILED_TABLE,
+        ]));
+
+        $named->enqueue(new QueuedMessage('message', 'payload'));
+
+        self::assertSame('message', $this->reserve()->message->type);
+    }
+
+    #[Test]
+    public function it_stores_times_in_utc_whatever_the_time_zone_of_its_clock(): void
+    {
+        $this->clock->set($this->at('12:00:00.250')->setTimezone(new DateTimeZone('Pacific/Kiritimati')));
+
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'), Duration::seconds(1));
+        $this->clock->set($this->at('12:00:01.249')->setTimezone(new DateTimeZone('America/Los_Angeles')));
+        self::assertNull($this->queue->reserve());
+
+        $this->clock->set($this->at('12:00:01.250'));
+        self::assertNotNull($this->queue->reserve());
+
+        $row = $this->database->table(self::TABLE)->first();
+
+        self::assertStringStartsWith('2026-10-05 12:00:31.25', $this->stored($row, 'available_at'));
+        self::assertStringStartsWith('2026-10-05 12:00:00', $this->stored($row, 'created_at'));
+    }
+
+    #[Test]
+    public function it_records_when_a_message_was_queued_and_when_it_failed(): void
+    {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+        $this->clock->advance(90_000);
+
+        $this->reserve()->fail();
+
+        self::assertStringStartsWith('2026-10-05 12:01:30', $this->stored(
+            $this->database->table(self::FAILED_TABLE)->first(),
+            'failed_at',
+        ));
+    }
+
+    #[Test]
+    public function it_discards_a_message_enqueued_in_a_transaction_that_rolls_back(): void
+    {
+        try {
+            $this->database->transaction(function (): void {
+                $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+
+                throw new RuntimeException('Roll back.');
+            });
+        } catch (RuntimeException) {
+            self::assertNull($this->queue->reserve());
+        }
+
+        $this->database->transaction(function (): void {
+            $this->queue->enqueue(new QueuedMessage('committed', 'payload'));
+        });
+
+        self::assertSame('committed', $this->reserve()->message->type);
+    }
+
+    #[Test]
+    public function it_reserves_a_released_message_after_the_messages_available_before_it(): void
+    {
+        $this->queue->enqueue(new QueuedMessage('first', 'payload'));
+        $this->queue->enqueue(new QueuedMessage('second', 'payload'));
+        $this->clock->advance(1);
+
+        $this->reserve()->release();
+
+        self::assertSame('second', $this->reserve()->message->type);
+        self::assertSame('first', $this->reserve()->message->type);
+    }
+
     /**
      * @return iterable<string, array{mixed}>
      */
@@ -890,6 +1014,47 @@ trait DatabaseQueueConformance
                 $exception->context,
             );
         }
+    }
+
+    private function schemaFor(): Schema
+    {
+        return new Schema($this->database, new SchemaGrammarResolver([
+            $this->driverName()->value => $this->schemaGrammar(),
+        ]));
+    }
+
+    /**
+     * @param array<string, mixed>|null $row
+     */
+    private function stored(?array $row, string $column): string
+    {
+        self::assertNotNull($row);
+
+        // @mago-expect analysis:mixed-assignment
+        $value = $row[$column] ?? null;
+        self::assertIsString($value);
+
+        return $value;
+    }
+
+    /**
+     * @param array<string, mixed>|null $row
+     *
+     * @return array<string, mixed>
+     */
+    private function only(?array $row, string ...$columns): array
+    {
+        self::assertNotNull($row);
+
+        $values = [];
+
+        foreach ($columns as $column) {
+            // @mago-expect analysis:mixed-assignment
+            $value = $row[$column] ?? null;
+            $values[$column] = is_string($value) && is_numeric($value) ? (int) $value : $value;
+        }
+
+        return $values;
     }
 
     private function at(string $time): DateTimeImmutable

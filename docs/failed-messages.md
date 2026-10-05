@@ -1,7 +1,7 @@
 ---
 id: failed-messages
 title: Failed messages
-sidebar_position: 6
+sidebar_position: 7
 description: Inspect, retry, and forget the messages a database queue failed for good.
 ---
 

@@ -1,7 +1,7 @@
 ---
 id: schema
 title: Schema
-sidebar_position: 3
+sidebar_position: 4
 description: Create, check, and drop the tables a database queue stores its messages in.
 ---
 
