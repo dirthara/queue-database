@@ -27,16 +27,17 @@ context, replacing values under the same keys, and returns the exception:
 throw $exception->addContext(['job' => $jobName]);
 ```
 
-An exception caused by a failure in Dirthara Database or Dirthara Schema is wrapped, with the original as its previous
-exception, so code using this package never has to catch theirs.
+Every exception from Dirthara Database or Dirthara Schema is wrapped, with the original as its previous exception, so
+code using this package never has to catch theirs. That covers any implementation of their `DatabaseException` and
+`SchemaException` interfaces, not only failed queries and connections.
 
 ## This package
 
 | Exception | Extends | Thrown when |
 | --- | --- | --- |
-| `QueueDatabaseConfigurationException` | `InvalidArgumentException` | `DatabaseQueueDriver` is given a connection that is not configured or has no query grammar, or a `reservation_timeout` below 1. |
+| `QueueDatabaseConfigurationException` | `InvalidArgumentException` | `DatabaseQueueDriver` is given a connection that is not configured or has no query grammar, or a `reservation_timeout` below 1; or `DatabaseQueue` is constructed with a reservation timeout of zero. |
 | `QueueDatabaseSchemaException` | `RuntimeException` | `QueueDatabaseSchema` cannot reach its connection, or cannot check, create, or drop its tables. |
-| `QueueOperationException` | `RuntimeException` | A queue operation, including a purge or truncate of failed messages, fails in the database, a stale delivery tries to settle a message another worker reserved again, a stored row is malformed, or a message's attempt count cannot be incremented. |
+| `QueueOperationException` | `RuntimeException` | A queue operation, including purging or clearing failed messages, fails in the database, a stale delivery tries to settle a message another worker reserved again, a stored row is malformed, or a message's attempt count cannot be incremented. |
 
 A `QueueOperationException` names the operation in its message. Its context holds `queue`, `table`, and `connection`,
 and, depending on the failure:

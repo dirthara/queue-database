@@ -127,7 +127,7 @@ final readonly class FailedMessageRepository
      * @throws QueryException
      * @throws ConnectionException
      */
-    public function truncate(): int
+    public function clear(): int
     {
         return $this->database->table($this->table)->where('queue', '=', $this->queue)->delete();
     }

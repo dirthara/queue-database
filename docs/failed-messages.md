@@ -2,7 +2,7 @@
 id: failed-messages
 title: Failed messages
 sidebar_position: 7
-description: Inspect, retry, forget, purge, and truncate the messages a database queue failed for good.
+description: Inspect, retry, forget, purge, and clear the messages a database queue failed for good.
 ---
 
 A message that is failed, usually because its retry policy gave up on it, moves from the messages table to the failed
@@ -41,7 +41,7 @@ $failed = $queue->findFailed($id);
 ```
 
 `failed()` returns the queue's failed messages in the order they failed. It reads them all at once, so forget, purge,
-or truncate failed messages that are dealt with rather than letting the table grow.
+or clear failed messages that are dealt with rather than letting the table grow.
 
 `findFailed()` returns the failed message with the id, or `null` when the queue has no failed message with that id.
 
@@ -69,28 +69,30 @@ $queue->forget($id);
 `retry()` and `forget()` throw Dirthara Queue's `FailedMessageNotFoundException` when the queue has no failed message
 with the id, including when another process retried or forgot it first.
 
-## Purging and truncating
+## Purging and clearing
 
 Two methods remove failed messages in bulk. They are not part of Dirthara Queue's contract, so call them on the
-`DatabaseQueue` itself:
+`DatabaseQueue` itself. `DatabaseQueueDriver::create()` returns one; a `QueueDriverRegistry` returns the `Queue`
+contract, so code that creates queues through a registry needs the `DatabaseQueue` type for these:
 
 ```php
 $removed = $queue->purgeFailed(new DateTimeImmutable('-30 days'));
 
-$removed = $queue->truncateFailed();
+$removed = $queue->clearFailed();
 ```
 
 | Method | Removes | Returns |
 | --- | --- | --- |
 | `purgeFailed(DateTimeImmutable $before)` | The failed messages that failed before the moment. | How many it removed. |
-| `truncateFailed()` | Every failed message. | How many it removed. |
+| `clearFailed()` | Every failed message. | How many it removed. |
 
 Both remove only the failed messages of their own queue: other queues sharing the table keep theirs, and messages
-still waiting in the queue are not touched. `truncateFailed()` deletes rows rather than truncating the table, because
-the table can hold failed messages of other queues.
+still waiting in the queue are not touched. `clearFailed()` deletes the queue's rows rather than truncating the table,
+because the table can hold failed messages of other queues.
 
 The time a message failed is kept to the second, so `purgeFailed()` compares whole seconds: a message that failed
 during the same second as the moment is kept, and is removed by a purge from the next second on. The moment is
-compared in UTC, whatever its time zone.
+compared in UTC, whatever its time zone. The failed messages table is indexed by queue and failure time, so a purge
+reads only the rows it removes.
 
 A database failure throws a `QueueOperationException`; see [exceptions](exceptions.md).

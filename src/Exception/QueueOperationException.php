@@ -87,7 +87,7 @@ final class QueueOperationException extends RuntimeException implements QueueDat
         return self::failed('purge the old failed messages of', $queue, $table, $connection, $previous);
     }
 
-    public static function truncateFailedMessagesFailed(
+    public static function clearFailedMessagesFailed(
         string $queue,
         string $table,
         string $connection,

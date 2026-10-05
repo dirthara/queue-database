@@ -15,14 +15,13 @@ use Dirthara\Database\ConnectedDatabase;
 use Dirthara\Queue\ValueObject\Duration;
 use Dirthara\Queue\ValueObject\FailedMessage;
 use Dirthara\Queue\ValueObject\QueuedMessage;
-use Dirthara\Database\Exception\QueryException;
-use Dirthara\Database\Exception\ConnectionException;
+use Dirthara\Database\Exception\DatabaseException;
 use Dirthara\QueueDatabase\Repository\StoredMessage;
-use Dirthara\Database\Exception\TransactionException;
 use Dirthara\Queue\Exception\FailedMessageNotFoundException;
 use Dirthara\QueueDatabase\Exception\QueueOperationException;
 use Dirthara\QueueDatabase\Repository\QueueMessageRepository;
 use Dirthara\QueueDatabase\Repository\FailedMessageRepository;
+use Dirthara\QueueDatabase\Exception\QueueDatabaseConfigurationException;
 use Dirthara\Queue\Contract\FailedMessageRepository as FailedMessageRepositoryContract;
 
 use function intdiv;
@@ -36,6 +35,9 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
 
     private FailedMessageRepository $failedMessages;
 
+    /**
+     * @throws QueueDatabaseConfigurationException
+     */
     public function __construct(
         private ConnectedDatabase $database,
         private ClockInterface $clock,
@@ -44,6 +46,10 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
         private string $failedTable,
         private Duration $reservationTimeout,
     ) {
+        if ($reservationTimeout->milliseconds === 0) {
+            throw QueueDatabaseConfigurationException::zeroReservationTimeout();
+        }
+
         $this->messages = new QueueMessageRepository($database, $queue, $table);
         $this->failedMessages = new FailedMessageRepository($database, $queue, $failedTable);
     }
@@ -57,7 +63,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
 
         try {
             $this->messages->insert($message, $this->after($now, $delay), $now);
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::enqueueFailed($this->queue, $this->table, $this->connection(), $exception);
         }
     }
@@ -69,7 +75,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     {
         try {
             $stored = $this->claimNext();
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::reserveFailed($this->queue, $this->table, $this->connection(), $exception);
         }
 
@@ -85,7 +91,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     {
         try {
             return $this->failedMessages->all();
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::readFailedMessagesFailed(
                 $this->queue,
                 $this->failedTable,
@@ -102,7 +108,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     {
         try {
             return $this->failedMessages->find($id);
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::findFailedMessageFailed(
                 $this->queue,
                 $this->failedTable,
@@ -131,7 +137,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
 
                 $this->messages->insert($failed->message, $now, $now);
             });
-        } catch (QueryException|ConnectionException|TransactionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::retryFailed(
                 $this->queue,
                 $this->failedTable,
@@ -150,7 +156,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     {
         try {
             $deleted = $this->failedMessages->delete($id);
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::forgetFailed(
                 $this->queue,
                 $this->failedTable,
@@ -172,7 +178,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     {
         try {
             return $this->failedMessages->purge($before);
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::purgeFailedMessagesFailed(
                 $this->queue,
                 $this->failedTable,
@@ -185,12 +191,12 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     /**
      * @throws QueueOperationException
      */
-    public function truncateFailed(): int
+    public function clearFailed(): int
     {
         try {
-            return $this->failedMessages->truncate();
-        } catch (QueryException|ConnectionException $exception) {
-            throw QueueOperationException::truncateFailedMessagesFailed(
+            return $this->failedMessages->clear();
+        } catch (DatabaseException $exception) {
+            throw QueueOperationException::clearFailedMessagesFailed(
                 $this->queue,
                 $this->failedTable,
                 $this->connection(),
@@ -200,8 +206,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     }
 
     /**
-     * @throws QueryException
-     * @throws ConnectionException
+     * @throws DatabaseException
      * @throws QueueOperationException
      */
     private function claimNext(): ?StoredMessage
@@ -239,7 +244,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     {
         try {
             $deleted = $this->messages->delete($id, $attempt);
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::acknowledgeFailed(
                 $this->queue,
                 $this->table,
@@ -260,7 +265,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
     {
         try {
             $held = $this->messages->makeAvailable($id, $attempt, $this->after($this->clock->now(), $delay));
-        } catch (QueryException|ConnectionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::releaseFailed($this->queue, $this->table, $this->connection(), $exception);
         }
 
@@ -284,7 +289,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepositoryCont
 
                 $this->failedMessages->insert($message, $attempt, $failure, $this->clock->now());
             });
-        } catch (QueryException|ConnectionException|TransactionException $exception) {
+        } catch (DatabaseException $exception) {
             throw QueueOperationException::failFailed(
                 $this->queue,
                 $this->failedTable,

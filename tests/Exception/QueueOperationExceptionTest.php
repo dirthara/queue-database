@@ -60,8 +60,8 @@ final class QueueOperationExceptionTest extends TestCase
             QueueOperationException::purgeFailedMessagesFailed('mail', 'failed_jobs', 'default', $previous),
             'Unable to purge the old failed messages of queue "mail" in table "failed_jobs" on connection "default".',
         ];
-        yield 'truncate failed messages' => [
-            QueueOperationException::truncateFailedMessagesFailed('mail', 'failed_jobs', 'default', $previous),
+        yield 'clear failed messages' => [
+            QueueOperationException::clearFailedMessagesFailed('mail', 'failed_jobs', 'default', $previous),
             'Unable to remove every failed message of queue "mail" in table "failed_jobs" on connection "default".',
         ];
         yield 'find a failed message' => [

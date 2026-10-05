@@ -24,7 +24,9 @@ $queue = $drivers->create(new QueueConfiguration('database', [
 ]));
 ```
 
-The driver returns a `DatabaseQueue`, which implements both `Queue` and `FailedMessageRepository`. Creating a queue
+`DatabaseQueueDriver::create()` returns a `DatabaseQueue`, which implements both `Queue` and `FailedMessageRepository`
+and adds the [purge and clear](failed-messages.md#purging-and-clearing) operations. A `QueueDriverRegistry` returns
+the `Queue` contract. Creating a queue
 does not connect to the database or create its tables; see [schema](schema.md).
 
 ## Options
@@ -82,9 +84,14 @@ $queue = new DatabaseQueue(
 
 Every argument is required: the defaults in the table above belong to the driver.
 
+The reservation timeout has to be positive: a zero timeout would let another worker reserve a message straight away,
+while it is still being handled, so the constructor throws a `QueueDatabaseConfigurationException`. Unlike the driver's
+`reservation_timeout` option, which counts whole seconds, the constructor accepts any positive duration, down to a
+millisecond.
+
 :::caution
-The constructor does not check the reservation timeout the way the driver does. A timeout below a second, and a zero
-timeout in particular, lets another worker reserve a message that is still being handled.
+A timeout shorter than a handler needs lets a second worker reserve a message that is still being handled; see
+[reservation expiry](queue-behaviour.md#reservation-expiry).
 :::
 
 ## Several queues on one pair of tables

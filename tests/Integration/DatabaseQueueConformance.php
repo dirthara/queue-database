@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dirthara\QueueDatabase\Tests\Integration;
 
 use PDO;
+use Closure;
 use DateTimeZone;
 use RuntimeException;
 use DateTimeImmutable;
@@ -32,6 +33,7 @@ use Dirthara\QueueDatabase\Driver\DatabaseQueueDriver;
 use Dirthara\QueueDatabase\Schema\QueueDatabaseSchema;
 use Dirthara\QueueDatabase\Tests\Fixtures\FrozenClock;
 use Dirthara\Database\Query\Grammar\QueryGrammarResolver;
+use Dirthara\Database\Exception\InvalidExpressionException;
 use Dirthara\Queue\Exception\FailedMessageNotFoundException;
 use Dirthara\Queue\Exception\DeliveryAlreadySettledException;
 use Dirthara\QueueDatabase\Exception\QueueOperationException;
@@ -47,7 +49,11 @@ use function in_array;
 use function array_map;
 use function is_string;
 use function is_numeric;
+use function preg_match;
 use function array_first;
+use function array_filter;
+use function array_values;
+use function str_contains;
 use function array_replace;
 use function array_key_last;
 use function iterator_to_array;
@@ -612,7 +618,7 @@ trait DatabaseQueueConformance
     }
 
     #[Test]
-    public function it_truncates_every_failed_message_of_its_own_queue(): void
+    public function it_clears_every_failed_message_of_its_own_queue(): void
     {
         $other = $this->queue('other');
         $this->failedMessage('first');
@@ -621,9 +627,9 @@ trait DatabaseQueueConformance
         $this->reserve($other)->fail();
         $this->queue->enqueue(new QueuedMessage('waiting', 'payload'));
 
-        self::assertSame(2, $this->queue->truncateFailed());
+        self::assertSame(2, $this->queue->clearFailed());
         self::assertSame([], $this->failedTypes());
-        self::assertSame(0, $this->queue->truncateFailed());
+        self::assertSame(0, $this->queue->clearFailed());
         self::assertCount(1, $this->failed($other));
         self::assertSame('waiting', $this->reserve()->message->type);
     }
@@ -639,13 +645,85 @@ trait DatabaseQueueConformance
     }
 
     #[Test]
-    public function it_wraps_a_database_failure_while_truncating_failed_messages(): void
+    public function it_wraps_a_database_failure_while_clearing_failed_messages(): void
     {
         $this->schema->drop();
 
         $this->expectOperationFailure(self::FAILED_TABLE, function (): void {
-            $this->queue->truncateFailed();
+            $this->queue->clearFailed();
         });
+    }
+
+    #[Test]
+    public function it_honours_a_reservation_timeout_of_one_millisecond_when_constructed_directly(): void
+    {
+        $queue = new DatabaseQueue(
+            database: $this->database->using(),
+            clock: $this->clock,
+            queue: 'default',
+            table: self::TABLE,
+            failedTable: self::FAILED_TABLE,
+            reservationTimeout: Duration::milliseconds(1),
+        );
+
+        $queue->enqueue(new QueuedMessage('message', 'payload'));
+        self::assertSame(1, $this->reserve($queue)->attempt);
+        self::assertNull($queue->reserve());
+
+        $this->clock->advance(1);
+        self::assertSame(2, $this->reserve($queue)->attempt);
+    }
+
+    #[Test]
+    public function it_indexes_failed_messages_by_queue_and_failure_time(): void
+    {
+        $indexes = array_values(array_filter(
+            $this->connection()->statements,
+            static fn(string $statement): bool => (
+                preg_match('/INDEX/i', $statement) === 1
+                && str_contains($statement, self::FAILED_TABLE)
+            ),
+        ));
+
+        self::assertCount(1, $indexes);
+        self::assertMatchesRegularExpression('/\(\W*queue\W*,\W*failed_at\W*\)/', $indexes[0]);
+    }
+
+    /**
+     * @return iterable<string, array{Closure(DatabaseQueue): mixed}>
+     */
+    public static function operations(): iterable
+    {
+        yield 'enqueue' => [
+            static fn(DatabaseQueue $queue) => $queue->enqueue(new QueuedMessage('message', 'payload')),
+        ];
+        yield 'reserve' => [static fn(DatabaseQueue $queue) => $queue->reserve()];
+        yield 'failed' => [static fn(DatabaseQueue $queue) => $queue->failed()];
+        yield 'find failed' => [static fn(DatabaseQueue $queue) => $queue->findFailed('1')];
+        yield 'retry' => [static fn(DatabaseQueue $queue) => $queue->retry('1')];
+        yield 'forget' => [static fn(DatabaseQueue $queue) => $queue->forget('1')];
+        yield 'purge failed' => [static fn(DatabaseQueue $queue) => $queue->purgeFailed(new DateTimeImmutable())];
+        yield 'clear failed' => [static fn(DatabaseQueue $queue) => $queue->clearFailed()];
+    }
+
+    /**
+     * @param Closure(DatabaseQueue): mixed $operation
+     */
+    #[Test]
+    #[DataProvider('operations')]
+    public function it_wraps_every_database_exception_its_operations_cause(Closure $operation): void
+    {
+        $queue = new DatabaseQueueDriver($this->database, $this->clock)->create(new QueueConfiguration('database', [
+            'table' => 'queue(messages)',
+            'failed_table' => 'failed(messages)',
+        ]));
+
+        try {
+            $operation($queue);
+            self::fail('The operation succeeded with an invalid table name.');
+        } catch (QueueOperationException $exception) {
+            self::assertInstanceOf(InvalidExpressionException::class, $exception->getPrevious());
+        }
     }
 
     #[Test]
@@ -766,7 +844,6 @@ trait DatabaseQueueConformance
 
         try {
             $queue = new DatabaseQueueDriver($this->database, $this->clock)->create(new QueueConfiguration('database'));
-            self::assertInstanceOf(DatabaseQueue::class, $queue);
 
             $queue->enqueue(new QueuedMessage('message', 'payload'));
             self::assertSame(1, $queue->reserve()?->attempt);
@@ -1240,16 +1317,12 @@ trait DatabaseQueueConformance
 
     private function queue(string $name): DatabaseQueue
     {
-        $queue = new DatabaseQueueDriver($this->database, $this->clock)->create(new QueueConfiguration('database', [
+        return new DatabaseQueueDriver($this->database, $this->clock)->create(new QueueConfiguration('database', [
             'queue' => $name,
             'table' => self::TABLE,
             'failed_table' => self::FAILED_TABLE,
             'reservation_timeout' => self::RESERVATION_TIMEOUT_SECONDS,
         ]));
-
-        self::assertInstanceOf(DatabaseQueue::class, $queue);
-
-        return $queue;
     }
 
     private function connection(): InterceptingConnection

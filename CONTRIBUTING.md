@@ -126,8 +126,6 @@ Then update the supported versions table below and in
 | --- | --- | --- |
 | `0.1` | 8.5 | Active |
 
-`0.1` has not been released yet; its first release will be tagged `0.1.0`.
-
 ## Before you open a pull request
 
 Run everything CI runs:

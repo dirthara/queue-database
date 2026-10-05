@@ -88,10 +88,14 @@ The failed messages table:
 | `failed_attempt` | The attempt that failed. |
 | `failure_type`, `failure_message` | The failure's class and message. |
 | `failure_code_integer`, `failure_code_string` | The failure's code, in whichever column matches its type; the other is `NULL`. |
+| `failed_at` | When it failed, in UTC to the second. |
 
 A message failed without a failure has `NULL` in all four failure columns. A failed message whose failure columns are
 only partly filled is treated as malformed; see [malformed rows](queue-behaviour.md#malformed-rows).
-| `failed_at` | When it failed, in UTC to the second. |
+
+The messages table is indexed by queue and availability, which is how a reservation finds the next message. The failed
+messages table is indexed by queue and failure time, which serves both listing a queue's failed messages and purging
+the old ones.
 
 The payload is base64 encoded because a serialised PHP object holds bytes, such as the null bytes around a private
 property's name, that PostgreSQL and SQL Server refuse in a text value. Every payload comes back exactly as it was

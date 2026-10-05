@@ -38,6 +38,14 @@ final class QueueDatabaseConfigurationException extends InvalidArgumentException
         );
     }
 
+    public static function zeroReservationTimeout(): self
+    {
+        return new self(message: 'Unable to create a database queue with a reservation timeout of 0 milliseconds: the timeout must be '
+        . 'positive, or a reserved message becomes available to another worker straight away.', context: [
+            'reservation_timeout_milliseconds' => 0,
+        ]);
+    }
+
     public static function invalidReservationTimeout(int $seconds): self
     {
         return new self(

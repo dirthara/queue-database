@@ -20,6 +20,11 @@ final class InterceptingConnection implements Connection
     private ?Closure $hook = null;
 
     /**
+     * @var list<string>
+     */
+    public private(set) array $statements = [];
+
+    /**
      * @var null|Closure(array<string, mixed>): array<string, mixed>
      */
     private ?Closure $rewrite = null;
@@ -55,6 +60,8 @@ final class InterceptingConnection implements Connection
 
             $hook();
         }
+
+        $this->statements[] = $query;
 
         $result = $this->connection->execute($query, $parameters);
 

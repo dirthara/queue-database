@@ -84,7 +84,7 @@ final readonly class QueueDatabaseSchema
                 $table->string('failure_code_string')->nullable();
                 $table->dateTime('failed_at', 0);
 
-                $table->index('queue');
+                $table->index(['queue', 'failed_at']);
             });
         } catch (SchemaException $exception) {
             throw QueueDatabaseSchemaException::createFailed(
