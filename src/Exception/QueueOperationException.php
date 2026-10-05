@@ -142,6 +142,31 @@ final class QueueOperationException extends RuntimeException implements QueueDat
         );
     }
 
+    public static function attemptsExhausted(
+        string $queue,
+        string $table,
+        string $connection,
+        int $id,
+        int $attempts,
+    ): self {
+        return new self(
+            message: sprintf(
+                'Unable to reserve message %d on queue "%s": its attempt counter of %d cannot be incremented any '
+                . 'further.',
+                $id,
+                self::printable($queue),
+                $attempts,
+            ),
+            context: [
+                'queue' => $queue,
+                'table' => $table,
+                'connection' => $connection,
+                'id' => $id,
+                'attempts' => $attempts,
+            ],
+        );
+    }
+
     public static function malformedRow(string $queue, string $table, string $connection, string $column): self
     {
         return new self(

@@ -19,6 +19,11 @@ final class InterceptingConnection implements Connection
 
     private ?Closure $hook = null;
 
+    /**
+     * @var null|Closure(array<string, mixed>): array<string, mixed>
+     */
+    private ?Closure $rewrite = null;
+
     public function __construct(
         private readonly Connection $connection,
     ) {}
@@ -32,6 +37,14 @@ final class InterceptingConnection implements Connection
         $this->hook = $hook;
     }
 
+    /**
+     * @param Closure(array<string, mixed>): array<string, mixed> $rewrite
+     */
+    public function rewriteRows(Closure $rewrite): void
+    {
+        $this->rewrite = $rewrite;
+    }
+
     public function execute(string $query, array $parameters = []): Result
     {
         $hook = $this->hook;
@@ -43,7 +56,11 @@ final class InterceptingConnection implements Connection
             $hook();
         }
 
-        return $this->connection->execute($query, $parameters);
+        $result = $this->connection->execute($query, $parameters);
+
+        return $this->rewrite !== null && str_starts_with($query, 'SELECT')
+            ? new RewrittenResult($result, $this->rewrite)
+            : $result;
     }
 
     public function lastInsertId(?string $sequence = null): ?string

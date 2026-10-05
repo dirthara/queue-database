@@ -26,17 +26,22 @@ use function intdiv;
 use function is_int;
 use function sprintf;
 use function array_map;
-use function is_scalar;
 use function is_string;
 use function filter_var;
+use function preg_match;
 use function base64_decode;
 use function base64_encode;
 
+use const PHP_INT_MIN;
 use const FILTER_VALIDATE_INT;
 
 final readonly class DatabaseQueue implements Queue, FailedMessageRepository
 {
     private const string LATEST = '9999-12-31 23:59:59';
+
+    private const int ATTEMPTS_LIMIT = 2_147_483_647;
+
+    private const string INTEGER_PATTERN = '/^-?(?:0|[1-9][0-9]*)$/';
 
     public function __construct(
         private ConnectedDatabase $database,
@@ -181,7 +186,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                     ->insert([
                         'queue' => $this->queue,
                         'type' => $this->text($row, 'type', $this->failedTable),
-                        'payload' => $this->text($row, 'payload', $this->failedTable),
+                        'payload' => base64_encode($this->payload($row, $this->failedTable)),
                         'attempts' => 0,
                         'available_at' => $this->availableAt($now),
                         'created_at' => $this->dateTime($now),
@@ -253,8 +258,19 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
      */
     private function claim(array $row, DateTimeImmutable $now): ?DatabaseDelivery
     {
-        $id = (int) $this->text($row, 'id', $this->table);
-        $attempts = (int) $this->text($row, 'attempts', $this->table);
+        $id = $this->integer($row, 'id', $this->table, minimum: 1);
+        $attempts = $this->integer($row, 'attempts', $this->table, minimum: 0);
+
+        if ($attempts >= self::ATTEMPTS_LIMIT) {
+            throw QueueOperationException::attemptsExhausted(
+                $this->queue,
+                $this->table,
+                $this->connection(),
+                $id,
+                $attempts,
+            );
+        }
+
         $attempt = $attempts + 1;
 
         $message = new QueuedMessage(
@@ -406,20 +422,18 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
     private function hydrateFailed(array $row): FailedMessage
     {
         return new FailedMessage(
-            id: $this->text($row, 'id', $this->failedTable),
+            id: (string) $this->integer($row, 'id', $this->failedTable, minimum: 1),
             message: new QueuedMessage(
                 type: $this->text($row, 'type', $this->failedTable),
                 payload: $this->payload($row, $this->failedTable),
             ),
-            attempt: (int) $this->text($row, 'failed_attempt', $this->failedTable),
+            attempt: $this->integer($row, 'failed_attempt', $this->failedTable, minimum: 1),
             failure: ($row['failure_type'] ?? null) === null
                 ? null
                 : new Failure(
                     type: $this->text($row, 'failure_type', $this->failedTable),
                     message: $this->text($row, 'failure_message', $this->failedTable),
-                    code: ($row['failure_code_integer'] ?? null) === null
-                        ? $this->text($row, 'failure_code_string', $this->failedTable)
-                        : (int) $this->text($row, 'failure_code_integer', $this->failedTable),
+                    code: $this->failureCode($row),
                 ),
         );
     }
@@ -429,13 +443,57 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
      *
      * @throws QueueOperationException
      */
+    private function failureCode(array $row): int|string
+    {
+        return match (true) {
+            ($row['failure_code_string'] ?? null) === null => $this->integer(
+                $row,
+                'failure_code_integer',
+                $this->failedTable,
+                minimum: PHP_INT_MIN,
+            ),
+            ($row['failure_code_integer'] ?? null) === null => $this->text(
+                $row,
+                'failure_code_string',
+                $this->failedTable,
+            ),
+            default => throw $this->malformedRow($this->failedTable, 'failure_code_string'),
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     *
+     * @throws QueueOperationException
+     */
     private function payload(array $row, string $table): string
     {
-        $payload = base64_decode($this->text($row, 'payload', $table), strict: true);
+        $encoded = $this->text($row, 'payload', $table);
+        $payload = base64_decode($encoded, strict: true);
 
-        return $payload === false
-            ? throw QueueOperationException::malformedRow($this->queue, $table, $this->connection(), 'payload')
-            : $payload;
+        return $payload !== false && base64_encode($payload) === $encoded
+            ? $payload
+            : throw $this->malformedRow($table, 'payload');
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     *
+     * @throws QueueOperationException
+     */
+    private function integer(array $row, string $column, string $table, int $minimum): int
+    {
+        // @mago-expect analysis:mixed-assignment
+        $value = $row[$column] ?? null;
+
+        $integer = match (true) {
+            is_int($value) => $value,
+            is_string($value) && preg_match(self::INTEGER_PATTERN, $value) === 1 && (string) (int) $value === $value
+                => (int) $value,
+            default => null,
+        };
+
+        return $integer !== null && $integer >= $minimum ? $integer : throw $this->malformedRow($table, $column);
     }
 
     /**
@@ -448,9 +506,12 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
         // @mago-expect analysis:mixed-assignment
         $value = $row[$column] ?? null;
 
-        return is_scalar($value)
-            ? (string) $value
-            : throw QueueOperationException::malformedRow($this->queue, $table, $this->connection(), $column);
+        return is_string($value) ? $value : throw $this->malformedRow($table, $column);
+    }
+
+    private function malformedRow(string $table, string $column): QueueOperationException
+    {
+        return QueueOperationException::malformedRow($this->queue, $table, $this->connection(), $column);
     }
 
     private function failedKey(string $id): ?int

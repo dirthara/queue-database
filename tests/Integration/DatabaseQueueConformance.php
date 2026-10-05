@@ -20,6 +20,7 @@ use Dirthara\Schema\Grammar\SchemaGrammar;
 use Dirthara\Queue\Config\QueueConfiguration;
 use Dirthara\Queue\ValueObject\FailedMessage;
 use Dirthara\Queue\ValueObject\QueuedMessage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Dirthara\Database\Connection\Driver\Driver;
 use Dirthara\Database\Exception\QueryException;
 use Dirthara\Database\Query\Grammar\QueryGrammar;
@@ -40,13 +41,17 @@ use Dirthara\QueueDatabase\Tests\Fixtures\StringCodedException;
 use Dirthara\QueueDatabase\Tests\Fixtures\InterceptingConnection;
 
 use function getenv;
+use function is_int;
 use function sprintf;
 use function in_array;
 use function array_map;
+use function array_replace;
 use function array_key_last;
 use function iterator_to_array;
+use function array_intersect_key;
 
 use const PHP_INT_MAX;
+use const PHP_INT_MIN;
 
 /**
  * @require-extends TestCase
@@ -586,6 +591,176 @@ trait DatabaseQueueConformance
         self::assertSame(0, (int) $this->database->table(self::TABLE)->max('attempts'));
     }
 
+    /**
+     * @return iterable<string, array{mixed}>
+     */
+    public static function malformedAttempts(): iterable
+    {
+        yield 'boolean' => [true];
+        yield 'float' => [1.0];
+        yield 'decimal string' => ['1.0'];
+        yield 'scientific notation' => ['1e3'];
+        yield 'leading whitespace' => [' 1'];
+        yield 'trailing whitespace' => ['1 '];
+        yield 'leading zero' => ['01'];
+        yield 'plus sign' => ['+1'];
+        yield 'negative zero' => ['-0'];
+        yield 'arbitrary string' => ['potato'];
+        yield 'empty string' => [''];
+        yield 'null' => [null];
+        yield 'negative integer' => [-1];
+        yield 'negative integer string' => ['-1'];
+        yield 'beyond the integer range' => ['9223372036854775808'];
+    }
+
+    #[Test]
+    #[DataProvider('malformedAttempts')]
+    public function it_refuses_a_message_whose_stored_attempts_are_malformed(mixed $attempts): void
+    {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+        $this->storedAs(['attempts' => $attempts]);
+
+        $this->expectMalformed(self::TABLE, 'attempts', $this->queue->reserve(...));
+    }
+
+    /**
+     * @return iterable<string, array{string, mixed}>
+     */
+    public static function malformedMessageColumns(): iterable
+    {
+        yield 'zero id' => ['id', 0];
+        yield 'negative id' => ['id', -3];
+        yield 'zero id string' => ['id', '0'];
+        yield 'float id' => ['id', 1.5];
+        yield 'numeric type' => ['type', 7];
+        yield 'null type' => ['type', null];
+        yield 'payload outside the alphabet' => ['payload', 'not base64!'];
+        yield 'payload with whitespace' => ['payload', 'cGF5 bG9hZA=='];
+        yield 'payload without padding' => ['payload', 'cGF5bG9hZA'];
+        yield 'null payload' => ['payload', null];
+    }
+
+    #[Test]
+    #[DataProvider('malformedMessageColumns')]
+    public function it_refuses_a_message_with_a_malformed_stored_value(string $column, mixed $value): void
+    {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+        $this->storedAs([$column => $value]);
+
+        $this->expectMalformed(self::TABLE, $column, $this->queue->reserve(...));
+    }
+
+    /**
+     * @return iterable<string, array{string, mixed, string}>
+     */
+    public static function malformedFailedMessageColumns(): iterable
+    {
+        yield 'zero id' => ['id', 0, 'id'];
+        yield 'zero failed attempt' => ['failed_attempt', 0, 'failed_attempt'];
+        yield 'decimal failed attempt' => ['failed_attempt', '1.0', 'failed_attempt'];
+        yield 'numeric type' => ['type', 5, 'type'];
+        yield 'payload without padding' => ['payload', 'cGF5bG9hZA', 'payload'];
+        yield 'failure without a message' => ['failure_message', null, 'failure_message'];
+        yield 'numeric failure type' => ['failure_type', 12, 'failure_type'];
+        yield 'decimal failure code' => ['failure_code_integer', '4.2', 'failure_code_integer'];
+        yield 'failure without a code' => ['failure_code_integer', null, 'failure_code_integer'];
+        yield 'failure with two codes' => ['failure_code_string', 'HY000', 'failure_code_string'];
+    }
+
+    #[Test]
+    #[DataProvider('malformedFailedMessageColumns')]
+    public function it_refuses_a_failed_message_with_a_malformed_stored_value(
+        string $column,
+        mixed $value,
+        string $malformed,
+    ): void {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+        $this->reserve()->fail(new RuntimeException('Failed.', 3));
+        $this->storedAs([$column => $value]);
+
+        $this->expectMalformed(self::FAILED_TABLE, $malformed, function (): void {
+            $this->queue->failed();
+        });
+    }
+
+    #[Test]
+    public function it_refuses_to_retry_a_failed_message_whose_stored_payload_is_malformed(): void
+    {
+        $id = $this->failedMessage('message');
+        $this->storedAs(['payload' => 'cGF5 bG9hZA==']);
+
+        $this->expectMalformed(self::FAILED_TABLE, 'payload', function () use ($id): void {
+            $this->queue->retry($id);
+        });
+
+        $this->connection()->rewriteRows(static fn(array $row): array => $row);
+        self::assertSame('payload', $this->queue->findFailed($id)?->message->payload);
+        self::assertNull($this->queue->reserve());
+    }
+
+    #[Test]
+    public function it_reads_integers_a_driver_returns_as_canonical_strings(): void
+    {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+        $this->reserve()->fail(new RuntimeException('Failed.', PHP_INT_MIN));
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+
+        $this->connection()->rewriteRows(static function (array $row): array {
+            foreach (['id', 'attempts', 'failed_attempt', 'failure_code_integer'] as $column) {
+                if (!is_int($row[$column] ?? null)) {
+                    continue;
+                }
+
+                $row[$column] = (string) $row[$column];
+            }
+
+            return $row;
+        });
+
+        $delivery = $this->reserve();
+        $failed = $this->failed();
+
+        self::assertSame(1, $delivery->attempt);
+        self::assertSame(1, $failed[0]->attempt);
+        self::assertSame(PHP_INT_MIN, $failed[0]->failure?->code);
+
+        $delivery->acknowledge();
+        $this->queue->forget($failed[0]->id);
+    }
+
+    #[Test]
+    public function it_keeps_a_negative_failure_code(): void
+    {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+
+        $this->reserve()->fail(new RuntimeException('Failed.', -42));
+
+        self::assertSame(-42, $this->failed()[0]->failure?->code);
+    }
+
+    #[Test]
+    public function it_refuses_to_reserve_a_message_whose_attempt_counter_cannot_be_incremented(): void
+    {
+        $this->insertMessage(attempts: 2_147_483_647);
+
+        try {
+            $this->queue->reserve();
+            self::fail('Reserving a message with an exhausted attempt counter succeeded.');
+        } catch (QueueOperationException $exception) {
+            self::assertSame(2_147_483_647, $exception->context['attempts']);
+        }
+
+        self::assertSame(2_147_483_647, (int) $this->database->table(self::TABLE)->max('attempts'));
+    }
+
+    #[Test]
+    public function it_reserves_a_message_up_to_the_last_attempt_its_counter_can_hold(): void
+    {
+        $this->insertMessage(attempts: 2_147_483_646);
+
+        self::assertSame(2_147_483_647, $this->reserve()->attempt);
+    }
+
     #[Test]
     public function it_wraps_a_database_failure_while_enqueueing(): void
     {
@@ -674,6 +849,47 @@ trait DatabaseQueueConformance
         $this->expectOperationFailure(self::FAILED_TABLE, function (): void {
             $this->queue->forget('1');
         });
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    private function storedAs(array $values): void
+    {
+        $this->connection()->rewriteRows(static fn(array $row): array => array_replace($row, array_intersect_key(
+            $values,
+            $row,
+        )));
+    }
+
+    private function insertMessage(int $attempts): void
+    {
+        $this->database
+            ->table(self::TABLE)
+            ->insert([
+                'queue' => 'default',
+                'type' => 'message',
+                'payload' => 'cGF5bG9hZA==',
+                'attempts' => $attempts,
+                'available_at' => '2026-10-05 12:00:00.000',
+                'created_at' => '2026-10-05 12:00:00',
+            ]);
+    }
+
+    /**
+     * @param callable(): mixed $operation
+     */
+    private function expectMalformed(string $table, string $column, callable $operation): void
+    {
+        try {
+            $operation();
+            self::fail(sprintf('The operation accepted a malformed "%s".', $column));
+        } catch (QueueOperationException $exception) {
+            self::assertSame(
+                ['queue' => 'default', 'table' => $table, 'connection' => 'conformance', 'column' => $column],
+                $exception->context,
+            );
+        }
     }
 
     private function at(string $time): DateTimeImmutable
