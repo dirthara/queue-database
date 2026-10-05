@@ -1,12 +1,5 @@
 #!/bin/sh
 
-# Applies this repository's branch protection to a release branch.
-#
-# Usage: scripts/protect-branch.sh 0.2
-#
-# Requires the gh CLI, authenticated with admin rights on the repository.
-# Protection is per branch, so every new release branch needs this once.
-
 set -e
 
 branch="$1"

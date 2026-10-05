@@ -11,8 +11,6 @@ RUN apt-get update \
     && install-php-extensions pdo_mysql pdo_pgsql pdo_sqlsrv \
     && install-php-extensions xdebug
 
-# Xdebug is installed but inactive, so the suite runs at full speed. Enable it
-# per command with XDEBUG_MODE, which is what the coverage script does.
 RUN printf 'xdebug.mode=off\n' > /usr/local/etc/php/conf.d/zzz-xdebug-mode.ini
 
 COPY --from=composer:2.10.3 /usr/bin/composer /usr/local/bin/composer

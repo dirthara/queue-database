@@ -2,12 +2,6 @@
 
 declare(strict_types=1);
 
-/**
- * Fails when line coverage of the source is below the required percentage.
- *
- * Usage: php scripts/coverage.php [clover.xml] [minimum percentage]
- */
-
 $report = $argv[1] ?? 'build/coverage/clover.xml';
 $minimum = (float) ($argv[2] ?? 100);
 

@@ -4,7 +4,6 @@ php-version = "8.5"
 paths = ["src", "tests"]
 includes = ["vendor"]
 
-# CS-1: 4 spaces and a soft line length of 120 characters.
 [formatter]
 print-width = 120
 tab-width = 4
@@ -13,14 +12,11 @@ sort-uses = "preserve"
 separate-use-types = true
 expand-use-groups = true
 
-# CS-1 §1: every file declares strict types.
 [linter.rules.strict-types]
 enabled = true
 level = "error"
 allow-disabling = false
 
-# CS-1 §5: root-level functions, classes, and constants are imported with a use statement, never used unqualified or
-# written fully qualified.
 [linter.rules.ambiguous-function-call]
 enabled = true
 level = "error"
@@ -41,8 +37,6 @@ level = "error"
 enabled = true
 level = "error"
 
-# CS-1 §1 and CS-2 §1: StudlyCaps class-likes and enum cases without Interface, Trait, or Abstract affixes, SNAKE_CASE
-# constants, and camelCase methods, properties, and variables.
 [linter.rules.class-name]
 enabled = true
 level = "error"
@@ -77,8 +71,6 @@ enabled = true
 level = "error"
 camel = true
 either = false
-# Test methods are snake_case under a #[Test] attribute, which this rule does not recognise: it only treats methods named
-# test* as tests. Their names are left to review.
 exclude = ["tests/"]
 
 [linter.rules.property-name]
@@ -94,7 +86,6 @@ camel = true
 either = false
 check-parameters = true
 
-# CS-3 §2: tests are marked with the #[Test] attribute rather than a test prefix.
 [linter.rules.prefer-test-attribute]
 enabled = true
 level = "error"
@@ -114,17 +105,21 @@ enabled = false
 [linter.rules.too-many-properties]
 enabled = false
 
-# The package depends on nothing beyond PHP; add a dependency here when the package requires one. Tests may use
-# anything.
 [[guard.perimeter.rules]]
 namespace = "Dirthara\\QueueDatabase\\"
-permit = ["@native", "Dirthara\\QueueDatabase\\**"]
+permit = [
+    "@native",
+    "Dirthara\\QueueDatabase\\**",
+    "Dirthara\\Database\\**",
+    "Dirthara\\Queue\\**",
+    "Dirthara\\Schema\\**",
+    "Psr\\Clock\\**",
+]
 
 [[guard.perimeter.rules]]
 namespace = "Dirthara\\QueueDatabase\\Tests\\"
 permit = ["@all"]
 
-# CS-1 §15: classes are final.
 [[guard.structural.rules]]
 on = "Dirthara\\QueueDatabase\\**"
 target = "class"
@@ -136,7 +131,6 @@ on = "Dirthara\\QueueDatabase\\Contract\\**"
 must-be = ["interface"]
 reason = "The Contract namespace holds only interfaces."
 
-# CS-7: every exception implements the package interface and carries its context through the shared trait.
 [[guard.structural.rules]]
 on = "Dirthara\\QueueDatabase\\Exception\\**"
 target = "class"
@@ -145,7 +139,6 @@ must-implement = "Dirthara\\QueueDatabase\\Exception\\QueueDatabaseException"
 must-use-trait = "Dirthara\\QueueDatabase\\Exception\\HasExceptionContext"
 reason = "Package exceptions implement QueueDatabaseException and use HasExceptionContext (CS-7)."
 
-# CS-3: test classes are suffixed with Test.
 [[guard.structural.rules]]
 on = "Dirthara\\QueueDatabase\\Tests\\**"
 not-on = "Dirthara\\QueueDatabase\\Tests\\Fixtures\\**"

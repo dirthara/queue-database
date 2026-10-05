@@ -1,6 +1,5 @@
 #!/bin/sh
 
-# Run every check, even when an earlier check fails.
 status=0
 
 mago fmt --check || status=1

@@ -26,9 +26,6 @@ trait HasExceptionContext
         return $this;
     }
 
-    /**
-     * Escapes control characters in a value quoted in a message, so a rejected value cannot forge a line in a log.
-     */
     private static function printable(string $value): string
     {
         return addcslashes($value, characters: "\0..\37\177");

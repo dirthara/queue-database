@@ -28,28 +28,29 @@ final readonly class QueueDatabaseSchema
 
     public function create(): void
     {
-        $this->connectedSchema->createIfNotExists($this->table, static function (Table $table) {
+        $this->connectedSchema->createIfNotExists($this->table, static function (Table $table): void {
             $table->id();
             $table->string('queue');
             $table->string('type');
-            $table->binary('payload'); // binary?
+            $table->text('payload');
             $table->integer('attempts')->unsigned();
-            $table->timestamp('available_at')->nullable();
-            $table->timestamp('created_at');
+            $table->bigInteger('available_at');
+            $table->dateTime('created_at');
 
             $table->index(['queue', 'available_at']);
         });
 
-        $this->connectedSchema->createIfNotExists($this->failedTable, static function (Table $table) {
+        $this->connectedSchema->createIfNotExists($this->failedTable, static function (Table $table): void {
             $table->id();
             $table->string('queue');
             $table->string('type');
-            $table->binary('payload'); // binary?
+            $table->text('payload');
             $table->integer('failed_attempt')->unsigned();
             $table->string('failure_type')->nullable();
             $table->text('failure_message')->nullable();
-            $table->string('failure_code')->nullable();
-            $table->timestamp('failed_at');
+            $table->bigInteger('failure_code_integer')->nullable();
+            $table->string('failure_code_string')->nullable();
+            $table->dateTime('failed_at');
 
             $table->index('queue');
         });
