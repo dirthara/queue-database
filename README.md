@@ -4,21 +4,31 @@
 
 # Dirthara QueueDatabase
 
-Database queue driver for the Dirthara framework. This repository is the initial package scaffold; no public API or release is available yet. Usage
-documentation lives in [`docs`](docs/intro.md) and is published on the Dirthara documentation site at
-<https://dirthara.github.io/docs/>, which documents every package in the framework.
+The durable queue driver for [Dirthara Queue](https://github.com/dirthara/queue). It stores queued and failed messages
+in a relational database (MySQL, PostgreSQL, SQLite, or SQL Server), so messages survive the process that published
+them and any number of workers can process the same queue. Reservations are claimed optimistically, without row locks,
+and a message whose worker disappears is delivered again once its reservation expires.
+
+Usage documentation lives in [`docs`](docs/intro.md): [setting up the tables](docs/schema.md),
+[configuring the driver](docs/configuration.md), [how the queue works](docs/queue-behaviour.md),
+[failed messages](docs/failed-messages.md), and [exceptions](docs/exceptions.md). It is published on the Dirthara
+documentation site at <https://dirthara.github.io/docs/>, which documents every package in the framework.
 
 ## Installation
 
 Requires PHP `^8.5` (PHP 8.5 or a later PHP 8 release), the `pdo` extension,
-[`dirthara/queue`](https://github.com/dirthara/queue) `^0.1`, and
-[`dirthara/database`](https://github.com/dirthara/database) `^0.1`, which
-Composer installs for you. Each database also needs its own PDO extension
-(`pdo_mysql`, `pdo_pgsql`, `pdo_sqlite`, or `pdo_sqlsrv`). Install with:
+[`dirthara/queue`](https://github.com/dirthara/queue) `^0.1.0`,
+[`dirthara/database`](https://github.com/dirthara/database) `^0.2.0`,
+[`dirthara/schema`](https://github.com/dirthara/schema) `^0.4.0`, and
+[`psr/clock`](https://github.com/php-fig/clock) `^1.0`, which Composer installs for you. Each database also needs its
+own PDO extension (`pdo_mysql`, `pdo_pgsql`, `pdo_sqlite`, or `pdo_sqlsrv`). Install with:
 
 ```sh
 composer require dirthara/queue-database
 ```
+
+The package does not create its tables when a queue is created; set them up with `QueueDatabaseSchema` first, as
+[the schema documentation](docs/schema.md) describes.
 
 ## Docker development environment
 
@@ -60,9 +70,6 @@ Behaviour that needs a real database belongs in `tests/Integration`, where one c
 driver. SQLite runs in memory and always runs; the PostgreSQL, MySQL, and SQL Server suites skip when their PDO driver
 is missing, and read their connection from `DIRTHARA_POSTGRES_*`, `DIRTHARA_MYSQL_*`, and `DIRTHARA_SQLSRV_*`
 (`_HOST`, `_PORT`, `_DATABASE`, `_USERNAME`, `_PASSWORD`), defaulting to the services in `compose.yaml`.
-
-The package starts with its exception interface, `Dirthara\QueueDatabase\Exception\QueueDatabaseException`, and the
-`HasExceptionContext` trait every exception uses to carry its context, both covered by tests.
 
 ## Code quality
 

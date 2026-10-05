@@ -2,34 +2,39 @@
 id: installation
 title: Installation
 sidebar_position: 2
-description: Requirements and installation status for Dirthara QueueDatabase.
+description: Requirements and installation of Dirthara QueueDatabase.
 ---
 
 ## Requirements
 
-| Requirement | Why |
-| --- | --- |
-| PHP 8.5 or later within the PHP 8 series | The language version every Dirthara package targets. |
-| `ext-pdo` | Messages are stored and fetched through a PDO connection. |
-| `dirthara/queue` `^0.1` | Defines the queue driver contract this package implements. |
-| `dirthara/database` `^0.1` | Owns the connections, drivers, and PDO handling the driver runs on. |
+PHP 8.5 or later within the PHP 8 series is required, with the `pdo` extension. Composer installs the runtime
+dependencies:
 
-Each database also needs its own PDO extension. Install only the ones you use:
-`pdo_mysql`, `pdo_pgsql`, `pdo_sqlite`, or `pdo_sqlsrv`.
+| Package | Provides |
+| --- | --- |
+| `dirthara/queue` `^0.1.0` | The queue, delivery, driver, and failed-message contracts this package implements. |
+| `dirthara/database` `^0.2.0` | The connections, query builder, and transactions the queue runs on. |
+| `dirthara/schema` `^0.4.0` | The table definitions `QueueDatabaseSchema` creates. |
+| `psr/clock` `^1.0` | The `ClockInterface` the queue reads the current time from. |
+
+Each database also needs its own PDO extension. Install only the one you use:
+
+| Database | Extension |
+| --- | --- |
+| MySQL | `pdo_mysql` |
+| PostgreSQL | `pdo_pgsql` |
+| SQLite | `pdo_sqlite` |
+| SQL Server | `pdo_sqlsrv` |
+
+The package does not ship a clock. Pass any implementation of the PSR-20 `Psr\Clock\ClockInterface`.
 
 ## Package installation
 
-Once published, install the package using Composer:
+Install the package with Composer:
 
 ```sh
 composer require dirthara/queue-database
 ```
 
-:::caution
-There is no published release yet. The command above describes the intended
-installation after publication.
-:::
-
 For development, follow the Docker and Composer setup in the repository's
-[README](https://github.com/dirthara/queue-database#readme). Development tooling
-includes PHPUnit, Mago, and Xdebug.
+[README](https://github.com/dirthara/queue-database#readme). Development tooling includes PHPUnit, Mago, and Xdebug.
