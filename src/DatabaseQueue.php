@@ -62,7 +62,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                     'type' => $message->type,
                     'payload' => base64_encode($message->payload),
                     'attempts' => 0,
-                    'available_at' => $this->dateTime($this->after($now, $delay)),
+                    'available_at' => $this->availableAt($this->after($now, $delay)),
                     'created_at' => $this->dateTime($now),
                 ]);
         } catch (QueryException|ConnectionException $exception) {
@@ -183,7 +183,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                         'type' => $this->text($row, 'type', $this->failedTable),
                         'payload' => $this->text($row, 'payload', $this->failedTable),
                         'attempts' => 0,
-                        'available_at' => $this->dateTime($now),
+                        'available_at' => $this->availableAt($now),
                         'created_at' => $this->dateTime($now),
                     ]);
             });
@@ -238,7 +238,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
         return $this->database
             ->table($this->table)
             ->where('queue', '=', $this->queue)
-            ->where('available_at', '<=', $this->dateTime($now))
+            ->where('available_at', '<=', $this->availableAt($now))
             ->orderBy('available_at')
             ->orderBy('id')
             ->first();
@@ -266,10 +266,10 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
             ->table($this->table)
             ->where('id', '=', $id)
             ->where('attempts', '=', $attempts)
-            ->where('available_at', '<=', $this->dateTime($now))
+            ->where('available_at', '<=', $this->availableAt($now))
             ->update([
                 'attempts' => $attempt,
-                'available_at' => $this->dateTime($this->after($now, $this->reservationTimeout)),
+                'available_at' => $this->availableAt($this->after($now, $this->reservationTimeout)),
             ]);
 
         if ($updated === 0) {
@@ -321,7 +321,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                 ->where('id', '=', $id)
                 ->where('attempts', '=', $attempt)
                 ->update([
-                    'available_at' => $this->dateTime($this->after($this->clock->now(), $delay)),
+                    'available_at' => $this->availableAt($this->after($this->clock->now(), $delay)),
                 ]);
 
             $held = $updated > 0 || $this->reservationExists($id, $attempt);
@@ -474,11 +474,17 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
 
         $after = $time->modify(sprintf(
             '+%d seconds +%d microseconds',
-            intdiv($delay->milliseconds, 1000),
+            intdiv($delay->milliseconds, num2: 1000),
             ($delay->milliseconds % 1000) * 1000,
         ));
+        $partial = (int) $after->format('u') % 1000;
 
-        return (int) $after->format('u') === 0 ? $after : $after->modify('+1 second');
+        return $partial === 0 ? $after : $after->modify(sprintf('+%d microseconds', 1000 - $partial));
+    }
+
+    private function availableAt(DateTimeImmutable $time): string
+    {
+        return $time->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s.v');
     }
 
     private function dateTime(DateTimeImmutable $time): string

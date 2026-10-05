@@ -99,7 +99,7 @@ trait DatabaseQueueConformance
         $this->schema = new QueueDatabaseSchema(new Schema($this->database, new SchemaGrammarResolver([
             $this->driverName()->value => $this->schemaGrammar(),
         ])), self::TABLE, self::FAILED_TABLE);
-        $this->clock = new FrozenClock(new DateTimeImmutable('2026-10-05 12:00:00', new DateTimeZone('UTC')));
+        $this->clock = new FrozenClock($this->at('12:00:00.250'));
         $this->queue = $this->queue('default');
 
         $this->schema->drop();
@@ -173,11 +173,11 @@ trait DatabaseQueueConformance
     }
 
     #[Test]
-    public function it_holds_a_delayed_message_back_until_its_delay_has_passed(): void
+    public function it_holds_a_delayed_message_back_to_the_millisecond(): void
     {
-        $this->queue->enqueue(new QueuedMessage('delayed', 'payload'), Duration::seconds(2));
+        $this->queue->enqueue(new QueuedMessage('delayed', 'payload'), Duration::milliseconds(1500));
 
-        $this->clock->advance(1999);
+        $this->clock->advance(1499);
         self::assertNull($this->queue->reserve());
 
         $this->clock->advance(1);
@@ -185,18 +185,18 @@ trait DatabaseQueueConformance
     }
 
     #[Test]
-    public function it_rounds_a_delay_up_to_the_next_whole_second(): void
+    public function it_rounds_a_delay_up_to_the_next_whole_millisecond(): void
     {
-        $this->clock->advance(250);
+        $this->clock->set($this->at('12:00:00.000400'));
         $this->queue->enqueue(new QueuedMessage('delayed', 'payload'), Duration::milliseconds(500));
         $this->queue->enqueue(new QueuedMessage('immediate', 'payload'));
 
         self::assertSame('immediate', $this->reserve()->message->type);
 
-        $this->clock->advance(749);
+        $this->clock->set($this->at('12:00:00.500999'));
         self::assertNull($this->queue->reserve());
 
-        $this->clock->advance(1);
+        $this->clock->set($this->at('12:00:00.501000'));
         self::assertSame('delayed', $this->reserve()->message->type);
     }
 
@@ -303,9 +303,9 @@ trait DatabaseQueueConformance
     {
         $this->queue->enqueue(new QueuedMessage('message', 'payload'));
 
-        $this->reserve()->release(Duration::seconds(1));
+        $this->reserve()->release(Duration::milliseconds(250));
 
-        $this->clock->advance(999);
+        $this->clock->advance(249);
         self::assertNull($this->queue->reserve());
 
         $this->clock->advance(1);
@@ -674,6 +674,11 @@ trait DatabaseQueueConformance
         $this->expectOperationFailure(self::FAILED_TABLE, function (): void {
             $this->queue->forget('1');
         });
+    }
+
+    private function at(string $time): DateTimeImmutable
+    {
+        return new DateTimeImmutable('2026-10-05 ' . $time, new DateTimeZone('UTC'));
     }
 
     private function queue(string $name): DatabaseQueue

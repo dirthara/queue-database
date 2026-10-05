@@ -66,7 +66,7 @@ final readonly class QueueDatabaseSchema
                 $table->string('type');
                 $table->text('payload');
                 $table->integer('attempts')->unsigned();
-                $table->timestamp('available_at')->nullable();
+                $table->timestamp('available_at', 3)->nullable();
                 $table->timestamp('created_at');
 
                 $table->index(['queue', 'available_at']);

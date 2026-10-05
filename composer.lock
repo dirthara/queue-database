@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4e6498c9e630aec273a27e96a0079d32",
+    "content-hash": "1a3421e2ef8234442311913582eb1c12",
     "packages": [
         {
             "name": "dirthara/database",
@@ -155,16 +155,16 @@
         },
         {
             "name": "dirthara/schema",
-            "version": "0.3.0",
+            "version": "0.4.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/dirthara/schema.git",
-                "reference": "3ffea5c51c3c65ba50d689f2f96b2b933e3d9332"
+                "reference": "986b492698b63271c709d0c370fb1dba4e74d04b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/dirthara/schema/zipball/3ffea5c51c3c65ba50d689f2f96b2b933e3d9332",
-                "reference": "3ffea5c51c3c65ba50d689f2f96b2b933e3d9332",
+                "url": "https://api.github.com/repos/dirthara/schema/zipball/986b492698b63271c709d0c370fb1dba4e74d04b",
+                "reference": "986b492698b63271c709d0c370fb1dba4e74d04b",
                 "shasum": ""
             },
             "require": {
@@ -199,9 +199,9 @@
             "description": "Schema definition and migrations for the Dirthara framework",
             "support": {
                 "issues": "https://github.com/dirthara/schema/issues",
-                "source": "https://github.com/dirthara/schema/tree/0.3.0"
+                "source": "https://github.com/dirthara/schema/tree/0.4.0"
             },
-            "time": "2026-09-30T15:47:28+00:00"
+            "time": "2026-10-05T00:52:23+00:00"
         },
         {
             "name": "psr/clock",
