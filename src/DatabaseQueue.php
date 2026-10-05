@@ -22,7 +22,9 @@ use Dirthara\Database\Exception\TransactionException;
 use Dirthara\Queue\Exception\FailedMessageNotFoundException;
 use Dirthara\QueueDatabase\Exception\QueueOperationException;
 
+use function intdiv;
 use function is_int;
+use function sprintf;
 use function array_map;
 use function is_scalar;
 use function is_string;
@@ -30,11 +32,12 @@ use function filter_var;
 use function base64_decode;
 use function base64_encode;
 
-use const PHP_INT_MAX;
 use const FILTER_VALIDATE_INT;
 
 final readonly class DatabaseQueue implements Queue, FailedMessageRepository
 {
+    private const string LATEST = '9999-12-31 23:59:59';
+
     public function __construct(
         private ConnectedDatabase $database,
         private ClockInterface $clock,
@@ -59,7 +62,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                     'type' => $message->type,
                     'payload' => base64_encode($message->payload),
                     'attempts' => 0,
-                    'available_at' => $this->after($this->milliseconds($now), $delay),
+                    'available_at' => $this->dateTime($this->after($now, $delay)),
                     'created_at' => $this->dateTime($now),
                 ]);
         } catch (QueryException|ConnectionException $exception) {
@@ -74,7 +77,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
     {
         try {
             do {
-                $now = $this->milliseconds($this->clock->now());
+                $now = $this->clock->now();
                 $row = $this->nextAvailable($now);
 
                 if ($row === null) {
@@ -180,7 +183,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                         'type' => $this->text($row, 'type', $this->failedTable),
                         'payload' => $this->text($row, 'payload', $this->failedTable),
                         'attempts' => 0,
-                        'available_at' => $this->milliseconds($now),
+                        'available_at' => $this->dateTime($now),
                         'created_at' => $this->dateTime($now),
                     ]);
             });
@@ -230,12 +233,12 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
      * @throws QueryException
      * @throws ConnectionException
      */
-    private function nextAvailable(int $now): ?array
+    private function nextAvailable(DateTimeImmutable $now): ?array
     {
         return $this->database
             ->table($this->table)
             ->where('queue', '=', $this->queue)
-            ->where('available_at', '<=', $now)
+            ->where('available_at', '<=', $this->dateTime($now))
             ->orderBy('available_at')
             ->orderBy('id')
             ->first();
@@ -248,7 +251,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
      * @throws ConnectionException
      * @throws QueueOperationException
      */
-    private function claim(array $row, int $now): ?DatabaseDelivery
+    private function claim(array $row, DateTimeImmutable $now): ?DatabaseDelivery
     {
         $id = (int) $this->text($row, 'id', $this->table);
         $attempts = (int) $this->text($row, 'attempts', $this->table);
@@ -263,10 +266,10 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
             ->table($this->table)
             ->where('id', '=', $id)
             ->where('attempts', '=', $attempts)
-            ->where('available_at', '<=', $now)
+            ->where('available_at', '<=', $this->dateTime($now))
             ->update([
                 'attempts' => $attempt,
-                'available_at' => $this->after($now, $this->reservationTimeout),
+                'available_at' => $this->dateTime($this->after($now, $this->reservationTimeout)),
             ]);
 
         if ($updated === 0) {
@@ -318,7 +321,7 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
                 ->where('id', '=', $id)
                 ->where('attempts', '=', $attempt)
                 ->update([
-                    'available_at' => $this->after($this->milliseconds($this->clock->now()), $delay),
+                    'available_at' => $this->dateTime($this->after($this->clock->now(), $delay)),
                 ]);
 
             $held = $updated > 0 || $this->reservationExists($id, $attempt);
@@ -457,20 +460,25 @@ final readonly class DatabaseQueue implements Queue, FailedMessageRepository
         return is_int($key) && (string) $key === $id ? $key : null;
     }
 
-    private function milliseconds(DateTimeImmutable $time): int
+    private function after(DateTimeImmutable $time, ?Duration $delay): DateTimeImmutable
     {
-        return ($time->getTimestamp() * 1000) + (int) $time->format('v');
-    }
-
-    private function after(int $milliseconds, ?Duration $delay): int
-    {
-        if ($delay === null) {
-            return $milliseconds;
+        if ($delay === null || $delay->milliseconds === 0) {
+            return $time;
         }
 
-        return $delay->milliseconds > (PHP_INT_MAX - $milliseconds)
-            ? PHP_INT_MAX
-            : $milliseconds + $delay->milliseconds;
+        $latest = new DateTimeImmutable(self::LATEST, new DateTimeZone('UTC'));
+
+        if ($delay->milliseconds >= (($latest->getTimestamp() - $time->getTimestamp()) * 1000)) {
+            return $latest;
+        }
+
+        $after = $time->modify(sprintf(
+            '+%d seconds +%d microseconds',
+            intdiv($delay->milliseconds, 1000),
+            ($delay->milliseconds % 1000) * 1000,
+        ));
+
+        return (int) $after->format('u') === 0 ? $after : $after->modify('+1 second');
     }
 
     private function dateTime(DateTimeImmutable $time): string

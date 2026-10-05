@@ -99,7 +99,7 @@ trait DatabaseQueueConformance
         $this->schema = new QueueDatabaseSchema(new Schema($this->database, new SchemaGrammarResolver([
             $this->driverName()->value => $this->schemaGrammar(),
         ])), self::TABLE, self::FAILED_TABLE);
-        $this->clock = new FrozenClock(new DateTimeImmutable('2026-10-05 12:00:00.250', new DateTimeZone('UTC')));
+        $this->clock = new FrozenClock(new DateTimeImmutable('2026-10-05 12:00:00', new DateTimeZone('UTC')));
         $this->queue = $this->queue('default');
 
         $this->schema->drop();
@@ -161,10 +161,10 @@ trait DatabaseQueueConformance
     #[Test]
     public function it_delivers_messages_in_the_order_they_became_available(): void
     {
-        $this->queue->enqueue(new QueuedMessage('later', 'payload'), Duration::milliseconds(1));
+        $this->queue->enqueue(new QueuedMessage('later', 'payload'), Duration::seconds(1));
         $this->queue->enqueue(new QueuedMessage('first', 'payload'));
         $this->queue->enqueue(new QueuedMessage('second', 'payload'));
-        $this->clock->advance(1);
+        $this->clock->advance(1000);
 
         self::assertSame('first', $this->reserve()->message->type);
         self::assertSame('second', $this->reserve()->message->type);
@@ -173,11 +173,27 @@ trait DatabaseQueueConformance
     }
 
     #[Test]
-    public function it_holds_a_delayed_message_back_to_the_millisecond(): void
+    public function it_holds_a_delayed_message_back_until_its_delay_has_passed(): void
     {
-        $this->queue->enqueue(new QueuedMessage('delayed', 'payload'), Duration::milliseconds(1500));
+        $this->queue->enqueue(new QueuedMessage('delayed', 'payload'), Duration::seconds(2));
 
-        $this->clock->advance(1499);
+        $this->clock->advance(1999);
+        self::assertNull($this->queue->reserve());
+
+        $this->clock->advance(1);
+        self::assertSame('delayed', $this->reserve()->message->type);
+    }
+
+    #[Test]
+    public function it_rounds_a_delay_up_to_the_next_whole_second(): void
+    {
+        $this->clock->advance(250);
+        $this->queue->enqueue(new QueuedMessage('delayed', 'payload'), Duration::milliseconds(500));
+        $this->queue->enqueue(new QueuedMessage('immediate', 'payload'));
+
+        self::assertSame('immediate', $this->reserve()->message->type);
+
+        $this->clock->advance(749);
         self::assertNull($this->queue->reserve());
 
         $this->clock->advance(1);
@@ -187,6 +203,10 @@ trait DatabaseQueueConformance
     #[Test]
     public function it_never_delivers_a_message_delayed_beyond_the_largest_time_it_can_store(): void
     {
+        if ($this->driverName() === DriverName::MySql) {
+            self::markTestSkipped('A MySQL TIMESTAMP column cannot hold a time after 2038-01-19 03:14:07 UTC.');
+        }
+
         $this->queue->enqueue(new QueuedMessage('never', 'payload'), Duration::milliseconds(PHP_INT_MAX));
 
         $this->clock->advance(3_153_600_000_000);
@@ -283,9 +303,9 @@ trait DatabaseQueueConformance
     {
         $this->queue->enqueue(new QueuedMessage('message', 'payload'));
 
-        $this->reserve()->release(Duration::milliseconds(250));
+        $this->reserve()->release(Duration::seconds(1));
 
-        $this->clock->advance(249);
+        $this->clock->advance(999);
         self::assertNull($this->queue->reserve());
 
         $this->clock->advance(1);
@@ -551,7 +571,7 @@ trait DatabaseQueueConformance
                 'type' => 'message',
                 'payload' => 'not base64!',
                 'attempts' => 0,
-                'available_at' => 0,
+                'available_at' => '2026-10-05 12:00:00',
                 'created_at' => '2026-10-05 12:00:00',
             ]);
 
