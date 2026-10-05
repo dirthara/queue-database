@@ -90,6 +90,11 @@ check-parameters = true
 enabled = true
 level = "error"
 
+# CS-1 §17: closures and arrow functions that do not use $this are static.
+[linter.rules.prefer-static-closure]
+enabled = true
+level = "error"
+
 [linter.rules.too-many-methods]
 enabled = false
 

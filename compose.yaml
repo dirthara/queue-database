@@ -1,6 +1,6 @@
 services:
   mago:
-    image: ghcr.io/carthage-software/mago:1.47.3
+    image: ghcr.io/carthage-software/mago:1.51.2
     profiles: ["tools"]
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     working_dir: /app

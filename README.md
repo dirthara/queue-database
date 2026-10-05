@@ -33,7 +33,7 @@ The package does not create its tables when a queue is created; set them up with
 
 ## Docker development environment
 
-Requires Docker with Docker Compose. The development image provides PHP 8.5 CLI, Composer 2.10.3, Mago 1.47.3, Xdebug,
+Requires Docker with Docker Compose. The development image provides PHP 8.5 CLI, Composer 2.10.3, Mago 1.51.2, Xdebug,
 and a PDO driver for every database the package supports: `pdo_sqlite`, `pdo_mysql`, `pdo_pgsql`, and `pdo_sqlsrv`.
 
 ```sh
@@ -121,6 +121,6 @@ branching, release, and pull request requirements, and [AGENTS.md](AGENTS.md) fo
 Report vulnerabilities through GitHub's private advisory form. See [SECURITY.md](SECURITY.md) for the reporting process and
 scope.
 
-## License
+## Licence
 
 Copyright (c) 2026 Dirthara. Released under the [MIT License](LICENSE).

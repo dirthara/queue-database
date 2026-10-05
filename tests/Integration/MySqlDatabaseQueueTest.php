@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Dirthara\QueueDatabase\Tests\Integration;
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\Attributes\Group;
+use Dirthara\Queue\ValueObject\Duration;
 use Dirthara\Schema\Grammar\SchemaGrammar;
+use Dirthara\Queue\ValueObject\QueuedMessage;
 use Dirthara\Database\Connection\Driver\Driver;
 use Dirthara\Schema\Grammar\MySqlSchemaGrammar;
 use Dirthara\Database\Query\Grammar\QueryGrammar;
@@ -22,6 +25,25 @@ use Dirthara\Database\Connection\Transaction\StandardTransactionGrammar;
 final class MySqlDatabaseQueueTest extends TestCase
 {
     use DatabaseQueueConformance;
+
+    #[Test]
+    public function it_keeps_the_stored_utc_time_when_the_session_time_zone_changes(): void
+    {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'), Duration::milliseconds(1500));
+
+        $this->database->execute("SET time_zone = '+05:00'");
+
+        self::assertStringStartsWith('2026-10-05 12:00:01.750', $this->stored(
+            $this->database->table(self::TABLE)->first(),
+            'available_at',
+        ));
+
+        $this->clock->advance(1499);
+        self::assertNull($this->queue->reserve());
+
+        $this->clock->advance(1);
+        self::assertSame('message', $this->reserve()->message->type);
+    }
 
     protected function driverName(): DriverName
     {

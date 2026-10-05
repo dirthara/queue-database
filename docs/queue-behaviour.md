@@ -89,27 +89,27 @@ duplicate itself, as described in Dirthara Queue's
 
 ## Time
 
-Every time the queue stores is an instant, read from the clock passed to the driver and stored in UTC, whatever the
-time zone of the clock, the PHP process, or the database session.
+Every time the queue stores is an instant, read from the clock passed to the driver and converted to UTC by the queue
+itself, whatever the time zone of the clock or the PHP process. The columns are date-time columns without a time zone
+(`DATETIME` on MySQL, `TIMESTAMP` without time zone on PostgreSQL, `DATETIME2` on SQL Server), so the database stores the
+UTC time exactly as written and never converts it for its session time zone.
 
 - **Availability is kept to the millisecond.** A delay, a release delay, and the reservation timeout are added to the
   current time and rounded up to the next whole millisecond, so a message never becomes available before its delay
   has passed.
 - **The creation and failure times are kept to the second.** They record when something happened, and nothing is
   scheduled by them.
+- **Every message has an availability.** A message available straight away is stored with the moment it was queued;
+  the column never holds `NULL`.
+- **Times reach the end of the year 9999 on every database.** A delay that would end later is shortened to it.
 - **Workers compare against their own clock.** A worker considers a message available when its own clock has reached
   the message's availability, so keep the clocks of the machines that run workers synchronised.
-
-:::caution
-MySQL stores a timestamp column as a `TIMESTAMP`, which cannot hold a time after 19 January 2038, 03:14:07 UTC. On
-MySQL, a delay or reservation that would end after that throws a `QueueOperationException`. The other databases store
-times up to the end of the year 9999; a delay beyond that is shortened to it.
-:::
 
 ## Malformed rows
 
 The queue checks every row it reads: the key and attempt count have to be integers in range, the type and payload text,
-and the payload valid base64. A row that fails the check, for example after a manual edit of the table, is never turned
+the payload valid base64, and a failed message's failure either complete, with a type, a message, and exactly one code,
+or absent from all four failure columns. A row that fails the check, for example after a manual edit of the table, is never turned
 into a delivery with a made-up value. Reading it throws a `QueueOperationException` that names its table and column.
 
 :::caution

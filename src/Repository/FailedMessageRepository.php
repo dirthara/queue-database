@@ -16,6 +16,7 @@ use Dirthara\QueueDatabase\Exception\QueueOperationException;
 use function is_int;
 use function array_map;
 use function is_string;
+use function array_find;
 use function filter_var;
 
 use const PHP_INT_MIN;
@@ -142,14 +143,31 @@ final readonly class FailedMessageRepository
             id: (string) $this->format->integer($row, 'id', minimum: 1),
             message: new QueuedMessage(type: $this->format->text($row, 'type'), payload: $this->format->payload($row)),
             attempt: $this->format->integer($row, 'failed_attempt', minimum: 1),
-            failure: ($row['failure_type'] ?? null) === null
-                ? null
-                : new Failure(
-                    type: $this->format->text($row, 'failure_type'),
-                    message: $this->format->text($row, 'failure_message'),
-                    code: $this->failureCode($row),
-                ),
+            failure: $this->hydrateFailure($row),
         );
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     *
+     * @throws QueueOperationException
+     */
+    private function hydrateFailure(array $row): ?Failure
+    {
+        if (($row['failure_type'] ?? null) !== null) {
+            return new Failure(
+                type: $this->format->text($row, 'failure_type'),
+                message: $this->format->text($row, 'failure_message'),
+                code: $this->failureCode($row),
+            );
+        }
+
+        $residual = array_find(
+            ['failure_message', 'failure_code_integer', 'failure_code_string'],
+            static fn(string $column): bool => ($row[$column] ?? null) !== null,
+        );
+
+        return $residual === null ? null : throw $this->format->malformed($residual);
     }
 
     /**

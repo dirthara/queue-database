@@ -47,6 +47,7 @@ use function in_array;
 use function array_map;
 use function is_string;
 use function is_numeric;
+use function array_first;
 use function array_replace;
 use function array_key_last;
 use function iterator_to_array;
@@ -208,10 +209,6 @@ trait DatabaseQueueConformance
     #[Test]
     public function it_never_delivers_a_message_delayed_beyond_the_largest_time_it_can_store(): void
     {
-        if ($this->driverName() === DriverName::MySql) {
-            self::markTestSkipped('A MySQL TIMESTAMP column cannot hold a time after 2038-01-19 03:14:07 UTC.');
-        }
-
         $this->queue->enqueue(new QueuedMessage('never', 'payload'), Duration::milliseconds(PHP_INT_MAX));
 
         $this->clock->advance(3_153_600_000_000);
@@ -359,7 +356,7 @@ trait DatabaseQueueConformance
 
         $this->reserve()->fail(new StringCodedException('Constraint violated.', '23000'));
 
-        self::assertSame('23000', $this->failed()[0]->failure?->code);
+        self::assertSame('23000', $this->onlyFailure()?->code);
     }
 
     #[Test]
@@ -648,6 +645,82 @@ trait DatabaseQueueConformance
 
         $this->expectOperationFailure(self::FAILED_TABLE, function (): void {
             $this->queue->truncateFailed();
+        });
+    }
+
+    #[Test]
+    public function it_requires_every_stored_message_to_have_an_availability(): void
+    {
+        $this->expectException(QueryException::class);
+
+        $this->database
+            ->table(self::TABLE)
+            ->insert([
+                'queue' => 'default',
+                'type' => 'message',
+                'payload' => 'cGF5bG9hZA==',
+                'attempts' => 0,
+                'available_at' => null,
+                'created_at' => '2026-10-05 12:00:00',
+            ]);
+    }
+
+    #[Test]
+    public function it_reads_a_failed_message_without_a_failure_when_every_failure_column_is_empty(): void
+    {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+        $this->reserve()->fail();
+        $this->storedAs([
+            'failure_type' => null,
+            'failure_message' => null,
+            'failure_code_integer' => null,
+            'failure_code_string' => null,
+        ]);
+
+        self::assertNull($this->failed()[0]->failure);
+    }
+
+    /**
+     * @return iterable<string, array{?RuntimeException, array<string, mixed>, string}>
+     */
+    public static function contradictoryFailures(): iterable
+    {
+        yield 'no type with a message' => [null, ['failure_message' => 'Failed.'], 'failure_message'];
+        yield 'no type with an integer code' => [null, ['failure_code_integer' => 42], 'failure_code_integer'];
+        yield 'no type with a string code' => [null, ['failure_code_string' => 'HY000'], 'failure_code_string'];
+        yield 'no type with a string code and a message' => [
+            null,
+            ['failure_code_string' => 'HY000', 'failure_message' => 'Failed.'],
+            'failure_message',
+        ];
+        yield 'type removed from a complete failure' => [
+            new RuntimeException('Failed.', 42),
+            ['failure_type' => null],
+            'failure_message',
+        ];
+        yield 'only a code left of a complete failure' => [
+            new RuntimeException('Failed.', 42),
+            ['failure_type' => null, 'failure_message' => null],
+            'failure_code_integer',
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    #[Test]
+    #[DataProvider('contradictoryFailures')]
+    public function it_refuses_a_failed_message_whose_failure_columns_contradict_each_other(
+        ?RuntimeException $failure,
+        array $values,
+        string $malformed,
+    ): void {
+        $this->queue->enqueue(new QueuedMessage('message', 'payload'));
+        $this->reserve()->fail($failure);
+        $this->storedAs($values);
+
+        $this->expectMalformed(self::FAILED_TABLE, $malformed, function (): void {
+            $this->queue->failed();
         });
     }
 
@@ -944,7 +1017,7 @@ trait DatabaseQueueConformance
 
         $this->reserve()->fail(new RuntimeException('Failed.', -42));
 
-        self::assertSame(-42, $this->failed()[0]->failure?->code);
+        self::assertSame(-42, $this->onlyFailure()?->code);
     }
 
     #[Test]
@@ -1099,6 +1172,16 @@ trait DatabaseQueueConformance
                 $exception->context,
             );
         }
+    }
+
+    private function onlyFailure(): ?Failure
+    {
+        $failed = array_first($this->failed());
+
+        self::assertNotNull($failed);
+        self::assertCount(1, $this->failed());
+
+        return $failed->failure;
     }
 
     /**

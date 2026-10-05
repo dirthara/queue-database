@@ -74,8 +74,8 @@ The messages table:
 | `type` | The message type recorded by the serialiser. |
 | `payload` | The serialised message, base64 encoded. |
 | `attempts` | How often the message has been reserved. |
-| `available_at` | When the message can next be reserved, to the millisecond. |
-| `created_at` | When it was first queued. |
+| `available_at` | When the message can next be reserved, in UTC to the millisecond. Never `NULL`. |
+| `created_at` | When it was first queued, in UTC to the second. |
 
 The failed messages table:
 
@@ -86,9 +86,12 @@ The failed messages table:
 | `type` | The message type. |
 | `payload` | The serialised message, base64 encoded. |
 | `failed_attempt` | The attempt that failed. |
-| `failure_type`, `failure_message` | The failure's class and message, or `null` when it was failed without one. |
-| `failure_code_integer`, `failure_code_string` | The failure's code, in whichever column matches its type. |
-| `failed_at` | When it failed. |
+| `failure_type`, `failure_message` | The failure's class and message. |
+| `failure_code_integer`, `failure_code_string` | The failure's code, in whichever column matches its type; the other is `NULL`. |
+
+A message failed without a failure has `NULL` in all four failure columns. A failed message whose failure columns are
+only partly filled is treated as malformed; see [malformed rows](queue-behaviour.md#malformed-rows).
+| `failed_at` | When it failed, in UTC to the second. |
 
 The payload is base64 encoded because a serialised PHP object holds bytes, such as the null bytes around a private
 property's name, that PostgreSQL and SQL Server refuse in a text value. Every payload comes back exactly as it was
