@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "dirthara/database",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/dirthara/database.git",
-                "reference": "122bd79e1561cead5b278c67b9618f91cb2a95a7"
+                "reference": "20f3b4fc8e91795f2656679d2b8ef36373cbd94b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/dirthara/database/zipball/122bd79e1561cead5b278c67b9618f91cb2a95a7",
-                "reference": "122bd79e1561cead5b278c67b9618f91cb2a95a7",
+                "url": "https://api.github.com/repos/dirthara/database/zipball/20f3b4fc8e91795f2656679d2b8ef36373cbd94b",
+                "reference": "20f3b4fc8e91795f2656679d2b8ef36373cbd94b",
                 "shasum": ""
             },
             "require": {
@@ -55,7 +55,7 @@
                 "issues": "https://github.com/dirthara/database/issues",
                 "source": "https://github.com/dirthara/database"
             },
-            "time": "2026-09-30T12:45:11+00:00"
+            "time": "2026-10-07T17:50:32+00:00"
         },
         {
             "name": "dirthara/messaging",
